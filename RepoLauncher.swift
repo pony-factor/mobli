@@ -130,6 +130,57 @@ actor OwnerCache {
     }
 }
 
+
+enum OwnerOrdering {
+    static func ordered(_ owners: [String], preferred: [String]) -> [String] {
+        var seen = Set<String>()
+        let unique = owners.filter { seen.insert($0).inserted }
+        let available = Set(unique)
+        var result: [String] = []
+        var placed = Set<String>()
+        for owner in preferred where available.contains(owner) && placed.insert(owner).inserted {
+            result.append(owner)
+        }
+        result.append(contentsOf: unique.filter { !placed.contains($0) }
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending })
+        return result
+    }
+
+    static func moving(_ source: String, relativeTo target: String, after: Bool,
+                       owners: [String], preferred: [String]) -> [String] {
+        guard source != target else { return preferred }
+        var order = ordered(preferred + owners, preferred: preferred)
+        guard let sourceIndex = order.firstIndex(of: source), order.contains(target) else { return preferred }
+        order.remove(at: sourceIndex)
+        guard let targetIndex = order.firstIndex(of: target) else { return preferred }
+        order.insert(source, at: min(order.count, targetIndex + (after ? 1 : 0)))
+        return order
+    }
+}
+
+@MainActor final class OwnerOrderPreferences: ObservableObject {
+    @Published private(set) var preferred: [String]
+    private let defaults: UserDefaults
+    private static let key = "studio.repository-launcher.owner-order"
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        preferred = defaults.stringArray(forKey: Self.key) ?? []
+    }
+
+    func ordered(_ owners: [String]) -> [String] {
+        OwnerOrdering.ordered(owners, preferred: preferred)
+    }
+
+    func move(_ source: String, relativeTo target: String, after: Bool, among owners: [String]) {
+        let next = OwnerOrdering.moving(source, relativeTo: target, after: after,
+                                        owners: owners, preferred: preferred)
+        guard next != preferred else { return }
+        preferred = next
+        defaults.set(next, forKey: Self.key)
+    }
+}
+
 @MainActor final class Library: ObservableObject {
     @Published var repos: [Repository] = []
     @Published var profiles: [String: OwnerProfile] = [:]
@@ -274,9 +325,11 @@ struct NotificationRow: View {
 struct LauncherView: View {
     @StateObject private var library = Library()
     @StateObject private var inbox = Inbox()
+    @StateObject private var ownerOrder = OwnerOrderPreferences()
     @State private var notifications = false
     @Environment(\.scenePhase) private var scenePhase
-    private var owners: [String] { notifications ? inbox.owners : library.owners }
+    private var availableOwners: [String] { notifications ? inbox.owners : library.owners }
+    private var owners: [String] { ownerOrder.ordered(availableOwners) }
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 20) {
@@ -308,6 +361,7 @@ struct LauncherView: View {
                                 if notifications {
                                     let threads = inbox.threads.filter { $0.owner == owner }
                                     OwnerHeader(owner: owner, profile: inbox.profiles[owner], subtitle: "\(threads.count) unread")
+                                        .draggable(owner).help("Drag to reorder organizations")
                                     ScrollView(.vertical) {
                                         LazyVStack(alignment: .leading, spacing: 0) {
                                             ForEach(threads) { thread in NotificationRow(thread: thread, inbox: inbox) }
@@ -315,6 +369,7 @@ struct LauncherView: View {
                                     }
                                 } else {
                                     OwnerHeader(owner: owner, profile: library.profiles[owner], subtitle: "\(library.repositories(for: owner).count) repos")
+                                        .draggable(owner).help("Drag to reorder organizations")
                                     ScrollView(.vertical) {
                                         LazyVStack(alignment: .leading, spacing: 0) {
                                             ForEach(library.repositories(for: owner)) { repo in
@@ -326,6 +381,12 @@ struct LauncherView: View {
                             }
                             .frame(width: width, height: max(200, geometry.size.height - 48))
                             .background(Palette.column).clipShape(RoundedRectangle(cornerRadius: 8))
+                            .dropDestination(for: String.self) { items, location in
+                                guard let source = items.first, source != owner else { return false }
+                                ownerOrder.move(source, relativeTo: owner, after: location.x > width / 2,
+                                                among: availableOwners)
+                                return true
+                            }
                         }
                     }.padding(24)
                 }
