@@ -375,6 +375,7 @@ enum OwnerOrdering {
         }
         do {
             try task.run()
+            NSApplication.shared.hide(nil)
         } catch { self.error = error.localizedDescription }
     }
 }
