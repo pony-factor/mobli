@@ -396,7 +396,7 @@ struct RepositoryRow: View {
         HStack(spacing: 0) {
             Button(action: open) {
                 HStack(spacing: 8) {
-                    Text(repo.name).font(.system(size: 13, weight: .medium)).lineLimit(2)
+                    Text(repo.name).font(.system(size: 15, weight: .medium)).lineLimit(2)
                         .multilineTextAlignment(.leading)
                     Spacer(minLength: 0)
                     if hovered { Image(systemName: "arrow.up.right").font(.system(size: 10)) }
@@ -443,12 +443,12 @@ struct OwnerHeader: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             VStack(alignment: .leading, spacing: 3) {
-                Text(profile?.displayName ?? owner).font(.system(size: 14, weight: .semibold)).lineLimit(2)
+                Text(profile?.displayName ?? owner).font(.system(size: 16, weight: .semibold)).lineLimit(2)
                 if showOwnerSlugs, let profile, profile.displayName != owner {
-                    Text(owner).font(.system(size: 11)).foregroundStyle(Palette.muted)
+                    Text(owner).font(.system(size: 12)).foregroundStyle(Palette.muted)
                 }
                 if let subtitle {
-                    Text(subtitle).font(.system(size: 11)).foregroundStyle(Palette.muted)
+                    Text(subtitle).font(.system(size: 12)).foregroundStyle(Palette.muted)
                 }
             }
             Spacer(minLength: 0)
@@ -471,9 +471,9 @@ struct AddOrganizationCard: View {
             VStack(spacing: 10) {
                 Image(systemName: "plus.circle")
                     .font(.system(size: 28, weight: .light))
-                Text("Add organization").font(.system(size: 14, weight: .semibold))
+                Text("Add organization").font(.system(size: 16, weight: .semibold))
                 Text("Create another organization list")
-                    .font(.system(size: 11)).foregroundStyle(Palette.muted)
+                    .font(.system(size: 12)).foregroundStyle(Palette.muted)
             }
             .foregroundStyle(hovered ? Color.white : Palette.text)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -521,9 +521,9 @@ struct NotificationRow: View {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: thread.symbol).font(.system(size: 12)).padding(.top, 2).foregroundStyle(Palette.muted)
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(thread.subject.title).font(.system(size: 13, weight: .medium)).multilineTextAlignment(.leading)
-                        Text(thread.repository.name).font(.system(size: 11)).foregroundStyle(Palette.muted)
-                        Text(thread.reason.replacingOccurrences(of: "_", with: " ")).font(.system(size: 10)).foregroundStyle(Palette.muted)
+                        Text(thread.subject.title).font(.system(size: 15, weight: .medium)).multilineTextAlignment(.leading)
+                        Text(thread.repository.name).font(.system(size: 12)).foregroundStyle(Palette.muted)
+                        Text(thread.reason.replacingOccurrences(of: "_", with: " ")).font(.system(size: 11)).foregroundStyle(Palette.muted)
                     }
                     Spacer(minLength: 0)
                 }.contentShape(Rectangle())
@@ -588,8 +588,7 @@ struct LauncherView: View {
                 Text(message).font(.system(size: 12)).foregroundStyle(Palette.muted).padding(.horizontal, 24).padding(.bottom, 8)
             }
             GeometryReader { geometry in
-                let columnCount = owners.count + (notifications ? 0 : 1)
-                let width = max(notifications ? 270 : 190, (geometry.size.width - 48 - CGFloat(max(0, columnCount - 1)) * 14) / CGFloat(max(1, columnCount)))
+                let width: CGFloat = notifications ? 320 : 260
                 ScrollView(.horizontal) {
                     HStack(alignment: .top, spacing: 14) {
                         ForEach(owners, id: \.self) { owner in
