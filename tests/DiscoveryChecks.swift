@@ -34,6 +34,23 @@ import Foundation
         precondition(RepositoryRanking.ranked([stale, fresh], usage: [:], now: rankingNow,
                                               pinned: [stale.usageKey, fresh.usageKey]).first?.name == "fresh")
 
+        let remoteDuplicate = Repository(
+            url: URL(fileURLWithPath: "/tmp/GitHub/org-a/shared"),
+            owner: "org-a",
+            lastActivityAt: rankingNow,
+            cloneURL: URL(string: "https://github.com/org-a/shared.git")
+        )
+        let remoteOnly = Repository(
+            url: URL(fileURLWithPath: "/tmp/GitHub/org-a/remote-only"),
+            owner: "org-a",
+            lastActivityAt: rankingNow,
+            cloneURL: URL(string: "https://github.com/org-a/remote-only.git")
+        )
+        let merged = Discovery.merged(local: [orgA], remote: [remoteDuplicate, remoteOnly])
+        precondition(merged.count == 2)
+        precondition(merged.first(where: { $0.usageKey == orgA.usageKey })?.isLocal == true)
+        precondition(merged.first(where: { $0.name == "remote-only" })?.isLocal == false)
+
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let repo = root.appendingPathComponent("old-owner/mobli")
