@@ -6,9 +6,22 @@ Public organization and personal owner profiles come from GitHub. Names and logo
 
 Repository discovery also refreshes when the app becomes active. It checks `.git` directories and worktree marker files and asks Git for the origin URL without reading repository contents or credential files.
 
-Build and install with `zsh build-app.sh`. The default destination is `~/Applications/Repository Launcher.app`; an optional first argument changes it. Requires macOS 14 or later, Swift command-line tools, and Visual Studio Code in `/Applications` or `~/Applications`.
+The compiled `Repository Launcher.app` lives in this repository and supports both Apple Silicon and Intel Macs. Drag that app to the Dock once. GitHub Actions tests and rebuilds it after changes reach `main`, then commits the new app back to `main`. After the workflow finishes, pull the repository, quit the launcher, and reopen it from the same Dock shortcut. The shortcut continues to point to the same app path. Source edits alone do not change a running app, and GitHub does not pull updates onto your Mac automatically.
 
-The build bundles a Dock icon generated with AppKit. Generated app binaries and cached profiles stay outside this checkout.
+For an optional stable link in your Applications folder, run this from the repository root before adding that link to the Dock:
+
+```sh
+mkdir -p "$HOME/Applications"
+ln -s "$PWD/Repository Launcher.app" "$HOME/Applications/Repository Launcher.app"
+```
+
+If that Applications path already contains an installed copy, move it aside first. Keep the clone at the same path so the link remains valid.
+
+To rebuild immediately after local source edits, quit the app and run `zsh build-app.sh`. This replaces the repository app with a build for your Mac's architecture; an optional first argument selects a different destination. Building locally requires Swift command-line tools. Running the app requires macOS 14 or later and Visual Studio Code in `/Applications` or `~/Applications`.
+
+The build bundles a Dock icon generated with AppKit. Cached public profiles stay outside this checkout. The apps are ad-hoc signed and are not notarized.
+
+Pull requests run the tests, build both architectures, and verify a universal app without publishing changes. On `main`, the workflow commits only the compiled app, skips publication if newer source changes have arrived, and uses GitHub's workflow token so its generated commit does not start another build. You can also start **Build app** manually on `main`. Workflow runs and optional downloads are available at https://github.com/pony-factor/mobli/actions/workflows/build-app.yml; downloads remain available for 30 days.
 
 ## Notifications
 
