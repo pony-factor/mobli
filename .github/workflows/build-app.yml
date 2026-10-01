@@ -1,0 +1,61 @@
+name: Build app
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and test (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    defaults:
+      run:
+        shell: zsh {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run checks
+        run: zsh tests/check.sh
+
+      - name: Build app
+        run: zsh build-app.sh "$RUNNER_TEMP/Repository Launcher.app"
+
+      - name: Verify and package app
+        run: |
+          set -eu
+          app_path="$RUNNER_TEMP/Repository Launcher.app"
+          plutil -lint "$app_path/Contents/Info.plist"
+          codesign --verify --deep --strict "$app_path"
+          lipo -verify_arch "${{ matrix.arch }}" "$app_path/Contents/MacOS/RepositoryLauncher"
+          ditto -c -k --sequesterRsrc --keepParent "$app_path" "$RUNNER_TEMP/Repository-Launcher-${{ matrix.arch }}.zip"
+
+      - name: Upload app
+        uses: actions/upload-artifact@v4
+        with:
+          name: Repository-Launcher-${{ matrix.arch }}
+          path: ${{ runner.temp }}/Repository-Launcher-${{ matrix.arch }}.zip
+          if-no-files-found: error
+          retention-days: 30

@@ -10,6 +10,8 @@ Build and install with `zsh build-app.sh`. The default destination is `~/Applica
 
 The build bundles a Dock icon generated with AppKit. Generated app binaries and cached profiles stay outside this checkout.
 
+GitHub Actions runs the checks and builds separate Apple Silicon (`arm64`) and Intel (`x86_64`) apps for pull requests and every merge to `main`. You can also start a build manually from the **Build app** workflow. Open a successful run at https://github.com/pony-factor/mobli/actions/workflows/build-app.yml and download the artifact for your Mac. Extract the artifact, then extract the app ZIP inside it, quit the running launcher, and copy `Repository Launcher.app` into `~/Applications` to replace the previous version. Builds remain available for 30 days. The apps are ad-hoc signed, like local builds, and are not notarized. Downloading a build does not update the installed app automatically.
+
 ## Notifications
 
 The Notifications tab shows unread GitHub threads in owner columns, including repositories that are not cloned locally. Click a title to open its discussion on GitHub, or click its checkmark to mark the thread as read. The inbox loads all pages and refreshes while the tab is open, respecting GitHub’s polling interval and conditional responses. Notifications stay in memory; only public owner names and logos use the seven-day disk cache.
