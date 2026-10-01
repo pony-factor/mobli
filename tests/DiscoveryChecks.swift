@@ -8,6 +8,25 @@ import Foundation
         for remote in ["https://example.com/pony-factor/mobli.git", "https://github.com/pony-factor", "/tmp/local.git"] {
             precondition(Discovery.githubOwner(from: remote) == nil)
         }
+        let rankingNow = Date(timeIntervalSince1970: 2_000_000_000)
+        let sameActivity = rankingNow.addingTimeInterval(-14 * 86_400.0)
+        let orgA = Repository(url: URL(fileURLWithPath: "/tmp/org-a/shared"), owner: "org-a",
+                              lastActivityAt: sameActivity)
+        let orgB = Repository(url: URL(fileURLWithPath: "/tmp/org-b/shared"), owner: "org-b",
+                              lastActivityAt: sameActivity)
+        let crossOrgUsage = [
+            "org-b/shared": RepositoryUsage(opens: 16, lastOpened: rankingNow)
+        ]
+        precondition(RepositoryRanking.ranked([orgA, orgB], usage: crossOrgUsage,
+                                              now: rankingNow).first?.owner == "org-b")
+
+        let fresh = Repository(url: URL(fileURLWithPath: "/tmp/org-a/fresh"), owner: "org-a",
+                               lastActivityAt: rankingNow.addingTimeInterval(-86_400))
+        let stale = Repository(url: URL(fileURLWithPath: "/tmp/org-a/stale"), owner: "org-a",
+                               lastActivityAt: rankingNow.addingTimeInterval(-365 * 86_400.0))
+        precondition(RepositoryRanking.ranked([stale, fresh], usage: [:],
+                                              now: rankingNow).first?.name == "fresh")
+
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let repo = root.appendingPathComponent("old-owner/mobli")
@@ -33,6 +52,6 @@ import Foundation
         try git(["remote", "remove", "origin"])
         discovered = try Discovery.scan(root)
         precondition(discovered[0].owner == "old-owner")
-        print("Discovery checks passed")
+        print("Discovery and activity-ranking checks passed")
     }
 }

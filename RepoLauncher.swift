@@ -4,8 +4,12 @@ import AppKit
 struct Repository: Identifiable, Sendable {
     let url: URL
     let owner: String
+    let lastActivityAt: Date?
+
     var id: String { url.path }
     var name: String { url.lastPathComponent }
+    var fullName: String { owner + "/" + name }
+    var usageKey: String { fullName.lowercased() }
 }
 
 enum Discovery {
@@ -38,6 +42,23 @@ enum Discovery {
         return githubOwner(from: remote) ?? fallback
     }
 
+    private static func lastCommitDate(of repository: URL) -> Date? {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        task.arguments = ["-C", repository.path, "log", "-1", "--format=%ct"]
+        let output = Pipe()
+        task.standardOutput = output
+        task.standardError = FileHandle.nullDevice
+        do { try task.run() } catch { return nil }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        task.waitUntilExit()
+        guard task.terminationStatus == 0,
+              let value = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              let seconds = Double(value) else { return nil }
+        return Date(timeIntervalSince1970: seconds)
+    }
+
     static func scan(_ root: URL) throws -> [Repository] {
         let fm = FileManager.default
         func directories(_ url: URL) throws -> [URL] {
@@ -47,14 +68,57 @@ enum Discovery {
         var repos: [Repository] = []
         for owner in try directories(root) {
             if fm.fileExists(atPath: owner.appendingPathComponent(".git").path) {
-                repos.append(Repository(url: owner, owner: self.owner(of: owner, fallback: "Local")))
+                let repositoryOwner = self.owner(of: owner, fallback: "Local")
+                repos.append(Repository(url: owner, owner: repositoryOwner,
+                                        lastActivityAt: lastCommitDate(of: owner)))
             } else {
                 for repo in try directories(owner) where fm.fileExists(atPath: repo.appendingPathComponent(".git").path) {
-                    repos.append(Repository(url: repo, owner: self.owner(of: repo, fallback: owner.lastPathComponent)))
+                    let repositoryOwner = self.owner(of: repo, fallback: owner.lastPathComponent)
+                    repos.append(Repository(url: repo, owner: repositoryOwner,
+                                            lastActivityAt: lastCommitDate(of: repo)))
                 }
             }
         }
         return repos
+    }
+}
+
+struct RepositoryUsage: Codable, Equatable {
+    var opens: Int
+    var lastOpened: Date?
+}
+
+enum RepositoryRanking {
+    private static let day: TimeInterval = 24 * 60 * 60
+
+    private static func daysSince(_ date: Date?, now: Date) -> Double {
+        guard let date else { return 3650 }
+        return max(0, now.timeIntervalSince(date) / day)
+    }
+
+    static func score(_ repository: Repository, usage: [String: RepositoryUsage],
+                      now: Date = Date()) -> Double {
+        let repositoryUsage = usage[repository.usageKey] ?? RepositoryUsage(opens: 0, lastOpened: nil)
+        let freshness = exp(-daysSince(repository.lastActivityAt, now: now) / 120)
+        let frequency = min(1, log2(Double(max(0, repositoryUsage.opens) + 1)) / 4)
+        let recentlyOpened = repositoryUsage.lastOpened
+            .map { exp(-daysSince($0, now: now) / 30) } ?? 0
+        return (freshness * 0.6) + (frequency * 0.27) + (recentlyOpened * 0.13)
+    }
+
+    static func ranked(_ repositories: [Repository], usage: [String: RepositoryUsage],
+                       now: Date = Date()) -> [Repository] {
+        repositories.sorted { first, second in
+            let scoreDifference = score(first, usage: usage, now: now)
+                - score(second, usage: usage, now: now)
+            if abs(scoreDifference) > 0.0001 { return scoreDifference > 0 }
+
+            let firstActivity = first.lastActivityAt ?? .distantPast
+            let secondActivity = second.lastActivityAt ?? .distantPast
+            if firstActivity != secondActivity { return firstActivity > secondActivity }
+
+            return first.fullName.localizedStandardCompare(second.fullName) == .orderedAscending
+        }
     }
 }
 
@@ -209,6 +273,36 @@ enum OwnerOrdering {
     }
 }
 
+@MainActor final class RepositoryUsageStore: ObservableObject {
+    @Published private var usage: [String: RepositoryUsage]
+    private let defaults: UserDefaults
+    private static let key = "studio.repository-launcher.repository-usage"
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        if let data = defaults.data(forKey: Self.key),
+           let saved = try? JSONDecoder().decode([String: RepositoryUsage].self, from: data) {
+            usage = saved
+        } else {
+            usage = [:]
+        }
+    }
+
+    func ranked(_ repositories: [Repository]) -> [Repository] {
+        RepositoryRanking.ranked(repositories, usage: usage)
+    }
+
+    func record(_ repository: Repository) {
+        var current = usage[repository.usageKey] ?? RepositoryUsage(opens: 0, lastOpened: nil)
+        current.opens += 1
+        current.lastOpened = Date()
+        usage[repository.usageKey] = current
+        if let data = try? JSONEncoder().encode(usage) {
+            defaults.set(data, forKey: Self.key)
+        }
+    }
+}
+
 @MainActor final class Library: ObservableObject {
     @Published var repos: [Repository] = []
     @Published var profiles: [String: OwnerProfile] = [:]
@@ -354,6 +448,25 @@ struct AddOrganizationCard: View {
     }
 }
 
+struct ThinRepositoryScrollbars: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { configure(view) }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { configure(nsView) }
+    }
+
+    private func configure(_ view: NSView) {
+        guard let scrollView = view.enclosingScrollView else { return }
+        scrollView.scrollerStyle = .overlay
+        scrollView.autohidesScrollers = true
+        scrollView.verticalScroller?.controlSize = .small
+    }
+}
+
 struct NotificationRow: View {
     let thread: InboxThread
     @ObservedObject var inbox: Inbox
@@ -385,6 +498,7 @@ struct LauncherView: View {
     @StateObject private var library = Library()
     @StateObject private var inbox = Inbox()
     @StateObject private var ownerOrder = OwnerOrderPreferences()
+    @StateObject private var repoUsage = RepositoryUsageStore()
     @State private var notifications = false
     @State private var addingOrganization = false
     @State private var newOrganization = ""
@@ -433,7 +547,8 @@ struct LauncherView: View {
                                         }.padding(.vertical, 4)
                                     }
                                 } else {
-                                    OwnerHeader(owner: owner, profile: library.profiles[owner], subtitle: "\(library.repositories(for: owner).count) repos")
+                                    let repositories = repoUsage.ranked(library.repositories(for: owner))
+                                    OwnerHeader(owner: owner, profile: library.profiles[owner], subtitle: "\(repositories.count) repos")
                                         .draggable(owner).help("Drag to reorder organizations")
                                         .contextMenu {
                                             if ownerOrder.isManual(owner) {
@@ -444,10 +559,15 @@ struct LauncherView: View {
                                         }
                                     ScrollView(.vertical) {
                                         LazyVStack(alignment: .leading, spacing: 0) {
-                                            ForEach(library.repositories(for: owner)) { repo in
-                                                RepositoryRow(repo: repo) { library.open(repo) }
+                                            ForEach(repositories) { repo in
+                                                RepositoryRow(repo: repo) {
+                                                    repoUsage.record(repo)
+                                                    library.open(repo)
+                                                }
                                             }
-                                        }.padding(.vertical, 4)
+                                        }
+                                        .padding(.vertical, 4)
+                                        .background(ThinRepositoryScrollbars())
                                     }
                                 }
                             }
