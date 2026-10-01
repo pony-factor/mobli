@@ -374,7 +374,18 @@ struct LauncherView: View {
     }
 }
 
+final class LauncherAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let icon = NSImage(contentsOf: url) {
+            NSApplication.shared.applicationIconImage = icon
+        }
+    }
+}
+
 @main struct RepoLauncherApp: App {
+    @NSApplicationDelegateAdaptor(LauncherAppDelegate.self) private var appDelegate
+
     var body: some Scene {
         WindowGroup("Repository Launcher") { LauncherView() }
             .windowStyle(.hiddenTitleBar)
