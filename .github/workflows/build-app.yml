@@ -49,7 +49,7 @@ jobs:
           app_path="$RUNNER_TEMP/Repository Launcher.app"
           plutil -lint "$app_path/Contents/Info.plist"
           codesign --verify --deep --strict "$app_path"
-          lipo -verify_arch "${{ matrix.arch }}" "$app_path/Contents/MacOS/RepositoryLauncher"
+          lipo "$app_path/Contents/MacOS/RepositoryLauncher" -verify_arch "${{ matrix.arch }}"
           ditto -c -k --sequesterRsrc --keepParent "$app_path" "$RUNNER_TEMP/Repository-Launcher-${{ matrix.arch }}.zip"
 
       - name: Upload app
