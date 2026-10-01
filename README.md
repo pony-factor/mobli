@@ -1,9 +1,11 @@
 # Repository Launcher
 
-A native macOS launcher for local repositories in `~/GitHub`. Owner folders become groups, with searchable repository cards, persistent favorites, and recently opened projects first within each group. It follows the owner grouping and pinning approach of the ChatGPT repository extension; favorites are stored separately for this app.
+A simple desktop launcher for repositories in `~/GitHub`. Each owner gets a column with its GitHub display name and logo above an alphabetical vertical list of repositories. Columns scroll horizontally when needed, and each repository list scrolls independently. Click a repository to open a separate VS Code window.
 
-Click a repository to open it with VS Code’s `--new-window` option. Existing windows stay open. The sidebar filters owners or favorites, and the folder picker supports another checkout root. Refresh with Command-R after adding repositories. Discovery checks for `.git` directories or worktree marker files without reading repository contents or credentials.
+Public organization and personal owner profiles come from GitHub. Names and logos are cached together for seven days in `~/Library/Caches/studio.repository-launcher/owners`. Fresh cache entries avoid network requests; expired entries refresh automatically when the app opens or becomes active. Previously cached profiles remain available offline. Owners without a GitHub display name fall back to their login.
+
+Repository discovery also refreshes when the app becomes active. It checks `.git` directories and worktree marker files without reading repository contents or credentials.
 
 Build and install with `zsh build-app.sh`. The default destination is `~/Applications/Repository Launcher.app`; an optional first argument changes it. Requires macOS 14 or later, Swift command-line tools, and Visual Studio Code in `/Applications` or `~/Applications`.
 
-Source lives in this repository; generated app binaries and app preferences stay outside the checkout.
+Generated app binaries and cached profiles stay outside this checkout.
