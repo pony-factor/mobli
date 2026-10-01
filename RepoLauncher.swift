@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-struct Repository: Identifiable {
+struct Repository: Identifiable, Sendable {
     let url: URL
     let owner: String
     var id: String { url.path }
@@ -9,6 +9,35 @@ struct Repository: Identifiable {
 }
 
 enum Discovery {
+    static func githubOwner(from remote: String) -> String? {
+        let value = remote.trimmingCharacters(in: .whitespacesAndNewlines)
+        let path: String
+        if value.hasPrefix("git@github.com:") {
+            path = String(value.dropFirst("git@github.com:".count))
+        } else if let url = URL(string: value), url.host?.lowercased() == "github.com",
+                  ["https", "http", "ssh", "git"].contains(url.scheme?.lowercased() ?? "") {
+            path = url.path
+        } else { return nil }
+        let parts = path.split(separator: "/")
+        guard parts.count == 2,
+              String(parts[0]).range(of: "^[A-Za-z0-9-]+$", options: .regularExpression) != nil else { return nil }
+        return String(parts[0])
+    }
+
+    private static func owner(of repository: URL, fallback: String) -> String {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        task.arguments = ["-C", repository.path, "config", "--get", "remote.origin.url"]
+        let output = Pipe()
+        task.standardOutput = output
+        task.standardError = FileHandle.nullDevice
+        do { try task.run() } catch { return fallback }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        task.waitUntilExit()
+        guard task.terminationStatus == 0, let remote = String(data: data, encoding: .utf8) else { return fallback }
+        return githubOwner(from: remote) ?? fallback
+    }
+
     static func scan(_ root: URL) throws -> [Repository] {
         let fm = FileManager.default
         func directories(_ url: URL) throws -> [URL] {
@@ -18,10 +47,10 @@ enum Discovery {
         var repos: [Repository] = []
         for owner in try directories(root) {
             if fm.fileExists(atPath: owner.appendingPathComponent(".git").path) {
-                repos.append(Repository(url: owner, owner: "Local"))
+                repos.append(Repository(url: owner, owner: self.owner(of: owner, fallback: "Local")))
             } else {
                 for repo in try directories(owner) where fm.fileExists(atPath: repo.appendingPathComponent(".git").path) {
-                    repos.append(Repository(url: repo, owner: owner.lastPathComponent))
+                    repos.append(Repository(url: repo, owner: self.owner(of: repo, fallback: owner.lastPathComponent)))
                 }
             }
         }
@@ -72,9 +101,9 @@ actor OwnerCache {
         return data
     }
 
-    func profile(_ owner: String) async -> OwnerProfile? {
+    func profile(_ owner: String, force: Bool = false) async -> OwnerProfile? {
         let old = cached(owner)
-        if let old, old.isFresh { return old }
+        if !force, let old, old.isFresh { return old }
         guard owner != "Local", owner.range(of: "^[A-Za-z0-9-]+$", options: .regularExpression) != nil else { return old }
         do {
             // Organization profiles expose the organization display name.
@@ -105,7 +134,7 @@ actor OwnerCache {
     @Published var repos: [Repository] = []
     @Published var profiles: [String: OwnerProfile] = [:]
     @Published var error: String?
-    private var refreshing = false
+    @Published private(set) var refreshing = false
     private let root = URL(fileURLWithPath: NSHomeDirectory() + "/GitHub")
     var owners: [String] {
         Array(Set(repos.map(\.owner))).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
@@ -113,19 +142,23 @@ actor OwnerCache {
     func repositories(for owner: String) -> [Repository] {
         repos.filter { $0.owner == owner }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
-    func refresh() async {
+    func refresh(forceProfiles: Bool = false) async {
         guard !refreshing else { return }
         refreshing = true
         defer { refreshing = false }
-        do { repos = try Discovery.scan(root) }
+        do {
+            let scanRoot = root
+            repos = try await Task.detached { try Discovery.scan(scanRoot) }.value
+        }
         catch { self.error = "Couldn’t read \(root.path): \(error.localizedDescription)" }
+        profiles = profiles.filter { owners.contains($0.key) }
         // Show disk-cached names and logos before any network request finishes.
         for owner in owners {
             if let profile = await OwnerCache.shared.cached(owner) { profiles[owner] = profile }
         }
         await withTaskGroup(of: (String, OwnerProfile?).self) { group in
             for owner in owners {
-                group.addTask { (owner, await OwnerCache.shared.profile(owner)) }
+                group.addTask { (owner, await OwnerCache.shared.profile(owner, force: forceProfiles)) }
             }
             for await (owner, profile) in group {
                 if let profile { profiles[owner] = profile }
@@ -201,6 +234,9 @@ struct OwnerHeader: View {
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text(profile?.displayName ?? owner).font(.system(size: 14, weight: .semibold)).lineLimit(2)
+                if let profile, profile.displayName != owner {
+                    Text(owner).font(.system(size: 11)).foregroundStyle(Palette.muted)
+                }
                 Text(subtitle).font(.system(size: 11)).foregroundStyle(Palette.muted)
             }
         }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -247,6 +283,12 @@ struct LauncherView: View {
                 tab("Repositories", selected: !notifications) { notifications = false }
                 tab("Notifications", selected: notifications) { notifications = true }
                 Spacer()
+                if !notifications {
+                    if library.refreshing { ProgressView().controlSize(.small) }
+                    Button { Task { await library.refresh(forceProfiles: true) } } label: { Image(systemName: "arrow.clockwise") }
+                        .buttonStyle(.plain).foregroundStyle(Palette.muted).disabled(library.refreshing)
+                        .help("Refresh repositories, owner names, and images")
+                }
                 if notifications {
                     if inbox.loading { ProgressView().controlSize(.small) }
                     Button { Task { await inbox.refresh() } } label: { Image(systemName: "arrow.clockwise") }
