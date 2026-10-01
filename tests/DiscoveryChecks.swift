@@ -27,6 +27,13 @@ import Foundation
         precondition(RepositoryRanking.ranked([stale, fresh], usage: [:],
                                               now: rankingNow).first?.name == "fresh")
 
+        precondition(RepositoryRanking.ranked([fresh, stale], usage: [:], now: rankingNow,
+                                              pinned: [stale.usageKey]).first?.name == "stale")
+        precondition(RepositoryRanking.ranked([orgA, orgB], usage: crossOrgUsage, now: rankingNow,
+                                              pinned: [orgA.usageKey]).first?.owner == "org-a")
+        precondition(RepositoryRanking.ranked([stale, fresh], usage: [:], now: rankingNow,
+                                              pinned: [stale.usageKey, fresh.usageKey]).first?.name == "fresh")
+
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let repo = root.appendingPathComponent("old-owner/mobli")

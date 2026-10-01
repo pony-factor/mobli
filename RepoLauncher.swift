@@ -107,8 +107,11 @@ enum RepositoryRanking {
     }
 
     static func ranked(_ repositories: [Repository], usage: [String: RepositoryUsage],
-                       now: Date = Date()) -> [Repository] {
+                       now: Date = Date(), pinned: Set<String> = []) -> [Repository] {
         repositories.sorted { first, second in
+            let firstPinned = pinned.contains(first.usageKey)
+            let secondPinned = pinned.contains(second.usageKey)
+            if firstPinned != secondPinned { return firstPinned }
             let scoreDifference = score(first, usage: usage, now: now)
                 - score(second, usage: usage, now: now)
             if abs(scoreDifference) > 0.0001 { return scoreDifference > 0 }
@@ -275,11 +278,14 @@ enum OwnerOrdering {
 
 @MainActor final class RepositoryUsageStore: ObservableObject {
     @Published private var usage: [String: RepositoryUsage]
+    @Published private(set) var pinned: Set<String>
+    private static let pinKey = "studio.repository-launcher.pinned-repositories"
     private let defaults: UserDefaults
     private static let key = "studio.repository-launcher.repository-usage"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        pinned = Set(defaults.stringArray(forKey: Self.pinKey) ?? [])
         if let data = defaults.data(forKey: Self.key),
            let saved = try? JSONDecoder().decode([String: RepositoryUsage].self, from: data) {
             usage = saved
@@ -289,7 +295,14 @@ enum OwnerOrdering {
     }
 
     func ranked(_ repositories: [Repository]) -> [Repository] {
-        RepositoryRanking.ranked(repositories, usage: usage)
+        RepositoryRanking.ranked(repositories, usage: usage, pinned: pinned)
+    }
+
+    func isPinned(_ repository: Repository) -> Bool { pinned.contains(repository.usageKey) }
+
+    func togglePin(_ repository: Repository) {
+        if !pinned.insert(repository.usageKey).inserted { pinned.remove(repository.usageKey) }
+        defaults.set(pinned.sorted(), forKey: Self.pinKey)
     }
 
     func record(_ repository: Repository) {
@@ -316,12 +329,19 @@ enum OwnerOrdering {
         repos.filter { $0.owner == owner }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
     func refresh(forceProfiles: Bool = false) async {
-        guard !refreshing else { return }
+        if refreshing {
+            guard forceProfiles else { return }
+            while refreshing {
+                do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+            }
+        }
+        guard !Task.isCancelled else { return }
         refreshing = true
         defer { refreshing = false }
         do {
             let scanRoot = root
             repos = try await Task.detached { try Discovery.scan(scanRoot) }.value
+            error = nil
         }
         catch { self.error = "Couldn’t read \(root.path): \(error.localizedDescription)" }
         profiles = profiles.filter { owners.contains($0.key) }
@@ -368,33 +388,49 @@ enum Palette {
 
 struct RepositoryRow: View {
     let repo: Repository
+    let pinned: Bool
+    let togglePin: () -> Void
     let open: () -> Void
     @State private var hovered = false
     var body: some View {
-        Button(action: open) {
-            HStack(spacing: 8) {
-                Text(repo.name).font(.system(size: 13, weight: .medium)).lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                Spacer(minLength: 0)
-                if hovered { Image(systemName: "arrow.up.right").font(.system(size: 10)) }
+        HStack(spacing: 0) {
+            Button(action: open) {
+                HStack(spacing: 8) {
+                    Text(repo.name).font(.system(size: 13, weight: .medium)).lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    Spacer(minLength: 0)
+                    if hovered { Image(systemName: "arrow.up.right").font(.system(size: 10)) }
+                }
+                .foregroundStyle(hovered ? Color.white : Palette.text)
+                .padding(.horizontal, 12).padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(hovered ? Color.white.opacity(0.07) : Color.clear)
+                .contentShape(Rectangle())
             }
-            .foregroundStyle(hovered ? Color.white : Palette.text)
-            .padding(.horizontal, 12).padding(.vertical, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(hovered ? Color.white.opacity(0.07) : Color.clear)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .accessibilityLabel(repo.name)
+            .onHover { hovered = $0 }
+            .help("Open \(repo.name) in a new VS Code window")
+            Button(action: togglePin) {
+                Image(systemName: pinned ? "pin.fill" : "pin")
+                    .font(.system(size: 12))
+                    .foregroundStyle(pinned ? Palette.text : Palette.muted)
+                    .padding(10)
+            }
+            .buttonStyle(.plain)
+            .help(pinned ? "Unpin repository" : "Pin repository to the top")
+            .accessibilityLabel(pinned ? "Unpin \(repo.name)" : "Pin \(repo.name)")
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(repo.name)
-        .onHover { hovered = $0 }
-        .help("Open \(repo.name) in a new VS Code window")
+        .contextMenu {
+            Button(pinned ? "Unpin repository" : "Pin repository", action: togglePin)
+        }
     }
 }
 
 struct OwnerHeader: View {
     let owner: String
     let profile: OwnerProfile?
-    let subtitle: String
+    let subtitle: String?
     var body: some View {
         HStack(spacing: 10) {
             if let data = profile?.avatar, let image = NSImage(data: data) {
@@ -410,9 +446,16 @@ struct OwnerHeader: View {
                 if let profile, profile.displayName != owner {
                     Text(owner).font(.system(size: 11)).foregroundStyle(Palette.muted)
                 }
-                Text(subtitle).font(.system(size: 11)).foregroundStyle(Palette.muted)
+                if let subtitle {
+                    Text(subtitle).font(.system(size: 11)).foregroundStyle(Palette.muted)
+                }
             }
+            Spacer(minLength: 0)
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 12)).foregroundStyle(Palette.muted)
+                .accessibilityLabel("Drag to reorder organization")
         }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         Rectangle().fill(Color.white.opacity(0.07)).frame(height: 1)
     }
 }
@@ -500,6 +543,9 @@ struct LauncherView: View {
     @StateObject private var ownerOrder = OwnerOrderPreferences()
     @StateObject private var repoUsage = RepositoryUsageStore()
     @State private var notifications = false
+    @State private var settings = false
+    @State private var dropTarget: String?
+    @AppStorage("studio.repository-launcher.show-repository-counts") private var showRepositoryCounts = true
     @State private var addingOrganization = false
     @State private var newOrganization = ""
     @State private var addOrganizationError: String?
@@ -511,22 +557,31 @@ struct LauncherView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 20) {
-                tab("Repositories", selected: !notifications) { notifications = false }
-                tab("Notifications", selected: notifications) { notifications = true }
+                tab("Repositories", selected: !notifications && !settings) { notifications = false; settings = false }
                 Spacer()
-                if !notifications {
-                    if library.refreshing { ProgressView().controlSize(.small) }
-                    Button { Task { await library.refresh(forceProfiles: true) } } label: { Image(systemName: "arrow.clockwise") }
-                        .buttonStyle(.plain).foregroundStyle(Palette.muted).disabled(library.refreshing)
-                        .help("Refresh repositories, owner names, and images")
-                }
-                if notifications {
-                    if inbox.loading { ProgressView().controlSize(.small) }
-                    Button { Task { await inbox.refresh() } } label: { Image(systemName: "arrow.clockwise") }
-                        .buttonStyle(.plain).foregroundStyle(Palette.muted).disabled(inbox.loading).help("Refresh inbox")
+                if library.refreshing || inbox.loading { ProgressView().controlSize(.small) }
+                if notifications && !settings {
                     Button("Connect GitHub", action: inbox.connect).buttonStyle(.plain).font(.system(size: 12))
                 }
+                tab("Notifications", selected: notifications && !settings) { notifications = true; settings = false }
+                Button { settings = true } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 14, weight: settings ? .semibold : .regular))
+                        .foregroundStyle(settings ? Palette.text : Palette.muted)
+                        .padding(.bottom, 6)
+                        .overlay(alignment: .bottom) {
+                            if settings { Rectangle().fill(Palette.text).frame(height: 2) }
+                        }
+                }
+                .buttonStyle(.plain)
+                .focusable(false)
+                .focusEffectDisabled()
+                .accessibilityLabel("Settings")
+                .help("Settings")
             }.padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 12)
+            if settings {
+                settingsPage
+            } else {
             if notifications, let message = inbox.message {
                 Text(message).font(.system(size: 12)).foregroundStyle(Palette.muted).padding(.horizontal, 24).padding(.bottom, 8)
             }
@@ -548,7 +603,7 @@ struct LauncherView: View {
                                     }
                                 } else {
                                     let repositories = repoUsage.ranked(library.repositories(for: owner))
-                                    OwnerHeader(owner: owner, profile: library.profiles[owner], subtitle: "\(repositories.count) repos")
+                                    OwnerHeader(owner: owner, profile: library.profiles[owner], subtitle: showRepositoryCounts ? "\(repositories.count) repos" : nil)
                                         .draggable(owner).help("Drag to reorder organizations")
                                         .contextMenu {
                                             if ownerOrder.isManual(owner) {
@@ -560,7 +615,8 @@ struct LauncherView: View {
                                     ScrollView(.vertical) {
                                         LazyVStack(alignment: .leading, spacing: 0) {
                                             ForEach(repositories) { repo in
-                                                RepositoryRow(repo: repo) {
+                                                RepositoryRow(repo: repo, pinned: repoUsage.isPinned(repo),
+                                                              togglePin: { repoUsage.togglePin(repo) }) {
                                                     repoUsage.record(repo)
                                                     library.open(repo)
                                                 }
@@ -573,11 +629,18 @@ struct LauncherView: View {
                             }
                             .frame(width: width, height: max(200, geometry.size.height - 48))
                             .background(Palette.column).clipShape(RoundedRectangle(cornerRadius: 8))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(dropTarget == owner ? Palette.text : .clear, lineWidth: 2)
+                            }
                             .dropDestination(for: String.self) { items, location in
-                                guard let source = items.first, source != owner else { return false }
+                                guard let source = items.first, source != owner, owners.contains(source) else { return false }
                                 ownerOrder.move(source, relativeTo: owner, after: location.x > width / 2,
                                                 among: availableOwners)
                                 return true
+                            } isTargeted: { targeted in
+                                if targeted { dropTarget = owner }
+                                else if dropTarget == owner { dropTarget = nil }
                             }
                         }
                         if !notifications {
@@ -601,10 +664,22 @@ struct LauncherView: View {
                     }
                 }
             }
+            }
         }
         .background(Palette.background).foregroundStyle(Palette.text).preferredColorScheme(.dark)
         .frame(minWidth: 650, minHeight: 400)
         .task { await library.refresh() }
+        .task(id: settings) {
+            guard settings else { return }
+            async let repositories: Void = library.refresh(forceProfiles: true)
+            async let notifications: Void = inbox.refresh()
+            _ = await (repositories, notifications)
+            for owner in ownerOrder.manualOwners where !library.owners.contains(owner) {
+                if let profile = await OwnerCache.shared.profile(owner, force: true) {
+                    library.profiles[owner] = profile
+                }
+            }
+        }
         .task(id: notifications) {
             guard notifications else { return }
             while !Task.isCancelled {
@@ -643,6 +718,45 @@ struct LauncherView: View {
             Button("OK") { library.error = nil }
         } message: { Text(library.error ?? "") }
     }
+    private var settingsPage: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                Text("Settings").font(.system(size: 22, weight: .semibold))
+                Text(library.refreshing || inbox.loading
+                     ? "Refreshing repositories, owner profiles, and notifications…"
+                     : "Opening Settings refreshes repositories, owner profiles, and notifications.")
+                    .font(.system(size: 12)).foregroundStyle(Palette.muted)
+                Toggle("Show repository counts in each category", isOn: $showRepositoryCounts)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Organization order").font(.system(size: 15, weight: .semibold))
+                    Text("Drag organization headers on the Repositories or Notifications page, or use the arrows below.")
+                        .font(.system(size: 12)).foregroundStyle(Palette.muted)
+                    let orderedOwners = ownerOrder.ordered(library.owners + ownerOrder.manualOwners + inbox.owners)
+                    ForEach(Array(orderedOwners.enumerated()), id: \.element) { index, owner in
+                        HStack {
+                            Text(library.profiles[owner]?.displayName ?? inbox.profiles[owner]?.displayName ?? owner)
+                            Spacer()
+                            Button {
+                                ownerOrder.move(owner, relativeTo: orderedOwners[index - 1], after: false, among: orderedOwners)
+                            } label: { Image(systemName: "arrow.up") }
+                            .disabled(index == 0).help("Move \(owner) earlier")
+                            .accessibilityLabel("Move \(owner) earlier")
+                            Button {
+                                ownerOrder.move(owner, relativeTo: orderedOwners[index + 1], after: true, among: orderedOwners)
+                            } label: { Image(systemName: "arrow.down") }
+                            .disabled(index == orderedOwners.count - 1).help("Move \(owner) later")
+                            .accessibilityLabel("Move \(owner) later")
+                        }
+                    }
+                }
+                Text("Use the pin beside a repository to keep it at the top of its category. Your pins and organization order are saved automatically.")
+                    .font(.system(size: 12)).foregroundStyle(Palette.muted)
+            }
+            .padding(24).frame(maxWidth: 650, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
     private func addOrganization() {
         guard let owner = ownerOrder.add(newOrganization) else {
             addOrganizationError = "Use a GitHub owner login containing only letters, numbers, and hyphens."
