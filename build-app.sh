@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -eu
 source_dir=${0:A:h}
-destination=${1:-"$HOME/Applications/Repository Launcher.app"}
+destination=${1:-"$source_dir/Repository Launcher.app"}
 mkdir -p "$destination/Contents/MacOS" "$destination/Contents/Resources"
 xcrun swiftc -O -parse-as-library "$source_dir/RepoLauncher.swift" "$source_dir/Notifications.swift" -o "$destination/Contents/MacOS/RepositoryLauncher" -framework SwiftUI -framework AppKit
 icon_dir=$(mktemp -d /tmp/mobli-icon.XXXXXX)

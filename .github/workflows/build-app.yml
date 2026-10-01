@@ -59,3 +59,74 @@ jobs:
           path: ${{ runner.temp }}/Repository-Launcher-${{ matrix.arch }}.zip
           if-no-files-found: error
           retention-days: 30
+
+  assemble:
+    name: Assemble universal app
+    needs: build
+    runs-on: macos-15
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: zsh {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: Repository-Launcher-*
+          path: ${{ runner.temp }}/builds
+      - name: Assemble and verify both architectures
+        run: |
+          set -eu
+          ditto -x -k "$RUNNER_TEMP/builds/Repository-Launcher-arm64/Repository-Launcher-arm64.zip" "$RUNNER_TEMP/arm64"
+          ditto -x -k "$RUNNER_TEMP/builds/Repository-Launcher-x86_64/Repository-Launcher-x86_64.zip" "$RUNNER_TEMP/x86_64"
+          zsh assemble-app.sh "$RUNNER_TEMP/arm64/Repository Launcher.app" "$RUNNER_TEMP/x86_64/Repository Launcher.app" "$RUNNER_TEMP/Repository Launcher.app"
+          ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/Repository Launcher.app" "$RUNNER_TEMP/Repository-Launcher-universal.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Repository-Launcher-universal
+          path: ${{ runner.temp }}/Repository-Launcher-universal.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Update app in repository
+    needs: assemble
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: macos-15
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: zsh {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Repository-Launcher-universal
+          path: ${{ runner.temp }}/universal
+      - name: Commit rebuilt app
+        run: |
+          set -eu
+          git fetch origin main
+          if [[ "$(git rev-parse origin/main)" != "$GITHUB_SHA" ]]; then
+            print 'A newer main commit exists; its workflow will publish the app.'
+            exit 0
+          fi
+          ditto -x -k "$RUNNER_TEMP/universal/Repository-Launcher-universal.zip" "$RUNNER_TEMP/rebuilt"
+          ditto "$RUNNER_TEMP/rebuilt/Repository Launcher.app" "Repository Launcher.app"
+          codesign --verify --deep --strict "Repository Launcher.app"
+          for architecture in arm64 x86_64; do
+            lipo "Repository Launcher.app/Contents/MacOS/RepositoryLauncher" -verify_arch "$architecture"
+          done
+          git add -- "Repository Launcher.app"
+          if git diff --cached --quiet; then
+            print 'The tracked app is already current.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m '📦 Update compiled repository launcher'
+          git push origin HEAD:main
