@@ -324,7 +324,11 @@ struct LauncherView: View {
                 .foregroundStyle(selected ? Palette.text : Palette.muted)
                 .padding(.bottom, 6)
                 .overlay(alignment: .bottom) { if selected { Rectangle().fill(Palette.text).frame(height: 2) } }
-        }.buttonStyle(.plain).accessibilityLabel(title)
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+        .focusEffectDisabled()
+        .accessibilityLabel(title)
     }
 }
 
