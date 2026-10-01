@@ -17,6 +17,9 @@ import Foundation
                                               owners: withNewOwner, preferred: movedLeft)
         precondition(movedRight == ["alpha", "beta", "zeta", "gamma"])
 
-        print("PASS: organization ordering, drag placement, persistence order, new-owner append")
+        precondition(OwnerOrdering.normalizedOwner("  pony-factor  ") == "pony-factor")
+        precondition(OwnerOrdering.normalizedOwner("not valid!") == nil)
+
+        print("PASS: organization ordering, drag placement, persistence order, new-owner append, owner validation")
     }
 }

@@ -156,20 +156,48 @@ enum OwnerOrdering {
         order.insert(source, at: min(order.count, targetIndex + (after ? 1 : 0)))
         return order
     }
+
+    static func normalizedOwner(_ value: String) -> String? {
+        let owner = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !owner.isEmpty,
+              owner.range(of: "^[A-Za-z0-9-]+$", options: .regularExpression) != nil else { return nil }
+        return owner
+    }
 }
 
 @MainActor final class OwnerOrderPreferences: ObservableObject {
     @Published private(set) var preferred: [String]
+    @Published private(set) var manualOwners: [String]
     private let defaults: UserDefaults
     private static let key = "studio.repository-launcher.owner-order"
+    private static let manualKey = "studio.repository-launcher.manual-owners"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         preferred = defaults.stringArray(forKey: Self.key) ?? []
+        manualOwners = defaults.stringArray(forKey: Self.manualKey) ?? []
     }
 
     func ordered(_ owners: [String]) -> [String] {
         OwnerOrdering.ordered(owners, preferred: preferred)
+    }
+
+    func add(_ value: String) -> String? {
+        guard let owner = OwnerOrdering.normalizedOwner(value) else { return nil }
+        if !manualOwners.contains(where: { $0.caseInsensitiveCompare(owner) == .orderedSame }) {
+            manualOwners.append(owner)
+            defaults.set(manualOwners, forKey: Self.manualKey)
+        }
+        return owner
+    }
+
+    func isManual(_ owner: String) -> Bool {
+        manualOwners.contains { $0.caseInsensitiveCompare(owner) == .orderedSame }
+    }
+
+    func removeManual(_ owner: String) {
+        manualOwners.removeAll { $0.caseInsensitiveCompare(owner) == .orderedSame }
+        defaults.set(manualOwners, forKey: Self.manualKey)
     }
 
     func move(_ source: String, relativeTo target: String, after: Bool, among owners: [String]) {
@@ -295,6 +323,37 @@ struct OwnerHeader: View {
     }
 }
 
+
+struct AddOrganizationCard: View {
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 10) {
+                Image(systemName: "plus.circle")
+                    .font(.system(size: 28, weight: .light))
+                Text("Add organization").font(.system(size: 14, weight: .semibold))
+                Text("Create another organization list")
+                    .font(.system(size: 11)).foregroundStyle(Palette.muted)
+            }
+            .foregroundStyle(hovered ? Color.white : Palette.text)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(hovered ? Color.white.opacity(0.05) : Color.clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.white.opacity(hovered ? 0.22 : 0.10),
+                        style: StrokeStyle(lineWidth: 1, dash: [6, 6]))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .accessibilityLabel("Add organization")
+    }
+}
+
 struct NotificationRow: View {
     let thread: InboxThread
     @ObservedObject var inbox: Inbox
@@ -327,8 +386,13 @@ struct LauncherView: View {
     @StateObject private var inbox = Inbox()
     @StateObject private var ownerOrder = OwnerOrderPreferences()
     @State private var notifications = false
+    @State private var addingOrganization = false
+    @State private var newOrganization = ""
+    @State private var addOrganizationError: String?
     @Environment(\.scenePhase) private var scenePhase
-    private var availableOwners: [String] { notifications ? inbox.owners : library.owners }
+    private var availableOwners: [String] {
+        notifications ? inbox.owners : library.owners + ownerOrder.manualOwners
+    }
     private var owners: [String] { ownerOrder.ordered(availableOwners) }
     var body: some View {
         VStack(spacing: 0) {
@@ -353,7 +417,8 @@ struct LauncherView: View {
                 Text(message).font(.system(size: 12)).foregroundStyle(Palette.muted).padding(.horizontal, 24).padding(.bottom, 8)
             }
             GeometryReader { geometry in
-                let width = max(notifications ? 270 : 190, (geometry.size.width - 48 - CGFloat(max(0, owners.count - 1)) * 14) / CGFloat(max(1, owners.count)))
+                let columnCount = owners.count + (notifications ? 0 : 1)
+                let width = max(notifications ? 270 : 190, (geometry.size.width - 48 - CGFloat(max(0, columnCount - 1)) * 14) / CGFloat(max(1, columnCount)))
                 ScrollView(.horizontal) {
                     HStack(alignment: .top, spacing: 14) {
                         ForEach(owners, id: \.self) { owner in
@@ -370,6 +435,13 @@ struct LauncherView: View {
                                 } else {
                                     OwnerHeader(owner: owner, profile: library.profiles[owner], subtitle: "\(library.repositories(for: owner).count) repos")
                                         .draggable(owner).help("Drag to reorder organizations")
+                                        .contextMenu {
+                                            if ownerOrder.isManual(owner) {
+                                                Button("Remove organization", role: .destructive) {
+                                                    ownerOrder.removeManual(owner)
+                                                }
+                                            }
+                                        }
                                     ScrollView(.vertical) {
                                         LazyVStack(alignment: .leading, spacing: 0) {
                                             ForEach(library.repositories(for: owner)) { repo in
@@ -388,10 +460,18 @@ struct LauncherView: View {
                                 return true
                             }
                         }
+                        if !notifications {
+                            AddOrganizationCard {
+                                newOrganization = ""
+                                addOrganizationError = nil
+                                addingOrganization = true
+                            }
+                            .frame(width: width, height: max(200, geometry.size.height - 48))
+                        }
                     }.padding(24)
                 }
                 .overlay {
-                    if owners.isEmpty {
+                    if notifications && owners.isEmpty {
                         VStack(spacing: 12) {
                             if notifications {
                                 Text(inbox.loading ? "Loading notifications…" : inbox.needsConnection ? "Connect GitHub to see your inbox" : inbox.message != nil ? "Your inbox is unavailable" : "You’re all caught up")
@@ -417,10 +497,47 @@ struct LauncherView: View {
                 Task { if notifications { await inbox.refresh() } else { await library.refresh() } }
             }
         }
+        .sheet(isPresented: $addingOrganization) {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Add organization").font(.system(size: 18, weight: .semibold))
+                Text("Enter a GitHub organization or owner login to create an empty list.")
+                    .font(.system(size: 12)).foregroundStyle(Palette.muted)
+                TextField("GitHub organization or owner", text: $newOrganization)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { addOrganization() }
+                if let addOrganizationError {
+                    Text(addOrganizationError).font(.system(size: 11)).foregroundStyle(.red)
+                }
+                HStack {
+                    Spacer()
+                    Button("Cancel") { addingOrganization = false }
+                    Button("Add") { addOrganization() }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(newOrganization.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .padding(24)
+            .frame(width: 390)
+        }
         .alert("Repository Launcher", isPresented: Binding(get: { library.error != nil }, set: { if !$0 { library.error = nil } })) {
             Button("OK") { library.error = nil }
         } message: { Text(library.error ?? "") }
     }
+    private func addOrganization() {
+        guard let owner = ownerOrder.add(newOrganization) else {
+            addOrganizationError = "Use a GitHub owner login containing only letters, numbers, and hyphens."
+            return
+        }
+        newOrganization = ""
+        addOrganizationError = nil
+        addingOrganization = false
+        Task { @MainActor in
+            if let profile = await OwnerCache.shared.profile(owner) {
+                library.profiles[owner] = profile
+            }
+        }
+    }
+
     private func tab(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title).font(.system(size: 13, weight: selected ? .semibold : .regular))
