@@ -9,3 +9,13 @@ Repository discovery also refreshes when the app becomes active. It checks `.git
 Build and install with `zsh build-app.sh`. The default destination is `~/Applications/Repository Launcher.app`; an optional first argument changes it. Requires macOS 14 or later, Swift command-line tools, and Visual Studio Code in `/Applications` or `~/Applications`.
 
 Generated app binaries and cached profiles stay outside this checkout.
+
+## Notifications
+
+The Notifications tab shows unread GitHub threads in owner columns, including repositories that are not cloned locally. Click a title to open its discussion on GitHub, or click its checkmark to mark the thread as read. The inbox loads all pages and refreshes while the tab is open, respecting GitHub’s polling interval and conditional responses. Notifications stay in memory; only public owner names and logos use the seven-day disk cache.
+
+Install GitHub CLI to connect an account. An existing GitHub CLI sign-in works automatically. **Connect GitHub** opens GitHub CLI’s browser authorization in Terminal, where the one-time code appears. Complete authorization and return to the launcher. GitHub CLI manages credentials; the launcher never reads credential files or extracts tokens.
+
+The ChatGPT repository extension currently uses personal tokens rather than a GitHub App sign-in. GitHub’s notifications API does not support GitHub App tokens or fine-grained personal tokens, so this launcher uses GitHub CLI’s OAuth connection with the notifications scope. API reference: https://docs.github.com/en/rest/activity/notifications
+
+Run focused notification model and HTTP parsing checks with `zsh tests/check.sh`.

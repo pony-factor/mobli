@@ -3,7 +3,7 @@ set -eu
 source_dir=${0:A:h}
 destination=${1:-"$HOME/Applications/Repository Launcher.app"}
 mkdir -p "$destination/Contents/MacOS" "$destination/Contents/Resources"
-xcrun swiftc -O -parse-as-library "$source_dir/RepoLauncher.swift" -o "$destination/Contents/MacOS/RepositoryLauncher" -framework SwiftUI -framework AppKit
+xcrun swiftc -O -parse-as-library "$source_dir/RepoLauncher.swift" "$source_dir/Notifications.swift" -o "$destination/Contents/MacOS/RepositoryLauncher" -framework SwiftUI -framework AppKit
 cat > "$destination/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
