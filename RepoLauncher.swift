@@ -431,6 +431,7 @@ struct OwnerHeader: View {
     let owner: String
     let profile: OwnerProfile?
     let subtitle: String?
+    let showOwnerSlugs: Bool
     var body: some View {
         HStack(spacing: 10) {
             if let data = profile?.avatar, let image = NSImage(data: data) {
@@ -443,7 +444,7 @@ struct OwnerHeader: View {
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text(profile?.displayName ?? owner).font(.system(size: 14, weight: .semibold)).lineLimit(2)
-                if let profile, profile.displayName != owner {
+                if showOwnerSlugs, let profile, profile.displayName != owner {
                     Text(owner).font(.system(size: 11)).foregroundStyle(Palette.muted)
                 }
                 if let subtitle {
@@ -546,6 +547,7 @@ struct LauncherView: View {
     @State private var settings = false
     @State private var dropTarget: String?
     @AppStorage("studio.repository-launcher.show-repository-counts") private var showRepositoryCounts = true
+    @AppStorage("studio.repository-launcher.show-owner-slugs") private var showOwnerSlugs = true
     @State private var addingOrganization = false
     @State private var newOrganization = ""
     @State private var addOrganizationError: String?
@@ -594,7 +596,7 @@ struct LauncherView: View {
                             VStack(alignment: .leading, spacing: 0) {
                                 if notifications {
                                     let threads = inbox.threads.filter { $0.owner == owner }
-                                    OwnerHeader(owner: owner, profile: inbox.profiles[owner], subtitle: "\(threads.count) unread")
+                                    OwnerHeader(owner: owner, profile: inbox.profiles[owner], subtitle: "\(threads.count) unread", showOwnerSlugs: showOwnerSlugs)
                                         .draggable(owner).help("Drag to reorder organizations")
                                     ScrollView(.vertical) {
                                         LazyVStack(alignment: .leading, spacing: 0) {
@@ -603,7 +605,7 @@ struct LauncherView: View {
                                     }
                                 } else {
                                     let repositories = repoUsage.ranked(library.repositories(for: owner))
-                                    OwnerHeader(owner: owner, profile: library.profiles[owner], subtitle: showRepositoryCounts ? "\(repositories.count) repos" : nil)
+                                    OwnerHeader(owner: owner, profile: library.profiles[owner], subtitle: showRepositoryCounts ? "\(repositories.count) repos" : nil, showOwnerSlugs: showOwnerSlugs)
                                         .draggable(owner).help("Drag to reorder organizations")
                                         .contextMenu {
                                             if ownerOrder.isManual(owner) {
@@ -727,6 +729,7 @@ struct LauncherView: View {
                      : "Opening Settings refreshes repositories, owner profiles, and notifications.")
                     .font(.system(size: 12)).foregroundStyle(Palette.muted)
                 Toggle("Show repository counts in each category", isOn: $showRepositoryCounts)
+                Toggle("Show GitHub owner slugs beneath display names", isOn: $showOwnerSlugs)
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Organization order").font(.system(size: 15, weight: .semibold))
                     Text("Drag organization headers on the Repositories or Notifications page, or use the arrows below.")
