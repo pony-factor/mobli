@@ -163,12 +163,35 @@ actor GitHubAgenda {
         guard let executable = GitHubInbox.executable else {
             NSWorkspace.shared.open(URL(string: "https://cli.github.com")!); return
         }
-        let command = "'" + executable + "' auth refresh --hostname github.com --scopes read:project"
-        let escaped = command.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-        let script = NSAppleScript(source: "tell application \"Terminal\"\nactivate\ndo script \"\(escaped)\"\nend tell")
-        var error: NSDictionary?
-        script?.executeAndReturnError(&error)
-        message = error == nil ? "Finish authorizing in your browser, then refresh Agenda." : "Open Terminal and run gh auth refresh --scopes read:project."
+        // Opening a command document does not require Apple Events permission.
+        // The document contains only the CLI invocation and deletes itself on launch.
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mobli-project-access-\(UUID().uuidString).command")
+        let command = """
+        #!/bin/zsh
+        rm -f -- "$0"
+        '\(executable)' auth refresh --hostname github.com --scopes read:project
+        """
+        do {
+            try Data((command + "\n").utf8).write(to: file, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: file.path)
+            let terminal = URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            NSWorkspace.shared.open([file], withApplicationAt: terminal, configuration: configuration) { _, error in
+                Task { @MainActor in
+                    if error != nil {
+                        try? FileManager.default.removeItem(at: file)
+                        self.message = "Couldn’t open Terminal. Run gh auth refresh --scopes read:project there."
+                    } else {
+                        self.message = "Follow the instructions in Terminal to authorize GitHub, then return to Agenda."
+                    }
+                }
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: file)
+            message = "Couldn’t start authorization. Run gh auth refresh --scopes read:project in Terminal."
+        }
     }
 }
 
