@@ -23,7 +23,7 @@ If that Applications path already contains an installed copy, move it aside firs
 
 To rebuild immediately after local source edits, quit the app and run `zsh build-app.sh`. This replaces the repository app with a build for your Mac's architecture; an optional first argument selects a different destination. Building locally requires Swift command-line tools. Running the app requires macOS 14 or later and Visual Studio Code in `/Applications` or `~/Applications`.
 
-The build bundles a Dock icon generated with AppKit. Cached public profiles stay outside this checkout. The apps are ad-hoc signed and are not notarized.
+The build bundles the Mayor Mare icon from `AppIcon.icns`, matching the existing GitHub Project app in Applications. The bundled icon works offline. Cached public profiles stay outside this checkout. The apps are ad-hoc signed and are not notarized.
 
 Pull requests run the tests, build both architectures, and verify a universal app without publishing changes. On `main`, the workflow commits only the compiled app, skips publication if newer source changes have arrived, and uses GitHub's workflow token so its generated commit does not start another build. You can also start **Build app** manually on `main`. Workflow runs and optional downloads are available at https://github.com/pony-factor/mobli/actions/workflows/build-app.yml; downloads remain available for 30 days.
 
