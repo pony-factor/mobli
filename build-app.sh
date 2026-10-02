@@ -3,7 +3,7 @@ set -eu
 source_dir=${0:A:h}
 destination=${1:-"$source_dir/Repository Launcher.app"}
 mkdir -p "$destination/Contents/MacOS" "$destination/Contents/Resources"
-xcrun swiftc -O -parse-as-library "$source_dir/RepoLauncher.swift" "$source_dir/Notifications.swift" "$source_dir/Agenda.swift" "$source_dir/Activity.swift" -o "$destination/Contents/MacOS/RepositoryLauncher" -framework SwiftUI -framework AppKit
+xcrun swiftc -O -parse-as-library "$source_dir/Sources/RepoLauncher.swift" "$source_dir/Sources/Notifications.swift" "$source_dir/Sources/Agenda.swift" "$source_dir/Sources/Activity.swift" -o "$destination/Contents/MacOS/RepositoryLauncher" -framework SwiftUI -framework AppKit
 ditto "$source_dir/AppIcon.icns" "$destination/Contents/Resources/AppIcon.icns"
 cat > "$destination/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

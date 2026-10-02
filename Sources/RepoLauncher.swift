@@ -934,6 +934,58 @@ struct AddOrganizationCard: View {
 }
 
 
+@MainActor final class SearchClickMonitor: ObservableObject {
+    weak var field: NSView?
+    weak var results: NSView?
+    private var eventMonitor: Any?
+    private var windowObserver: NSObjectProtocol?
+
+    func start(dismiss: @escaping () -> Void) {
+        stop()
+        windowObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: nil, queue: .main) { [weak self] notification in
+            MainActor.assumeIsolated {
+                guard let window = notification.object as? NSWindow, self?.field?.window === window else { return }
+                dismiss()
+            }
+        }
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
+            guard let self, let field = self.field, field.window != nil else { return event }
+            for region in [field, self.results].compactMap({ $0 }) {
+                if region.window === event.window,
+                   region.bounds.contains(region.convert(event.locationInWindow, from: nil)) {
+                    return event
+                }
+            }
+            dismiss()
+            return event
+        }
+    }
+
+    func stop() {
+        if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
+        eventMonitor = nil
+        if let windowObserver { NotificationCenter.default.removeObserver(windowObserver) }
+        windowObserver = nil
+    }
+}
+
+struct SearchClickRegion: NSViewRepresentable {
+    let monitor: SearchClickMonitor
+    let isResults: Bool
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        register(view)
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) { register(view) }
+
+    private func register(_ view: NSView) {
+        if isResults { monitor.results = view } else { monitor.field = view }
+    }
+}
+
 struct FolderSearchBar: View {
     @Binding var query: String
     let results: [FolderSearchResult]
@@ -941,6 +993,7 @@ struct FolderSearchBar: View {
     let message: String?
     let open: (FolderSearchResult) -> Void
     @FocusState private var focused: Bool
+    @StateObject private var clickMonitor = SearchClickMonitor()
 
     private var hasQuery: Bool {
         !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -978,6 +1031,7 @@ struct FolderSearchBar: View {
         .background(Palette.column.overlay(focused ? Palette.accent.opacity(0.10) : Color.clear))
         .clipShape(RoundedRectangle(cornerRadius: 7))
         .contentShape(Rectangle())
+        .background(SearchClickRegion(monitor: clickMonitor, isResults: false))
         .onTapGesture { focused = true }
         .overlay {
             RoundedRectangle(cornerRadius: 7)
@@ -1033,6 +1087,7 @@ struct FolderSearchBar: View {
                 }
                 .padding(.vertical, 4)
                 .frame(width: 440)
+                .background(SearchClickRegion(monitor: clickMonitor, isResults: true))
                 .background(Palette.column)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .overlay {
@@ -1044,6 +1099,8 @@ struct FolderSearchBar: View {
             }
         }
         .onExitCommand { focused = false }
+        .onAppear { clickMonitor.start { focused = false } }
+        .onDisappear { clickMonitor.stop() }
         .zIndex(20)
     }
 
@@ -1355,12 +1412,6 @@ struct LauncherView: View {
         .background(Palette.background).foregroundStyle(Palette.text).preferredColorScheme(.dark)
         .tint(Palette.accent)
         .frame(minWidth: 650, minHeight: 400)
-        .onDisappear {
-            folderQuery = ""
-            folderResults = []
-            folderSearching = false
-            folderSearchMessage = nil
-        }
         .task { await library.refresh(priorityOwners: ownerOrder.manualOwners) }
         .task(id: folderQuery) {
             let query = folderQuery.trimmingCharacters(in: .whitespacesAndNewlines)

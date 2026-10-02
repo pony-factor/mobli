@@ -7,15 +7,15 @@ python3 - "$repo_dir" "$check_dir" <<'PY'
 from pathlib import Path
 import sys
 repo, out = map(Path, sys.argv[1:])
-source = (repo / 'RepoLauncher.swift').read_text()
+source = (repo / 'Sources' / 'RepoLauncher.swift').read_text()
 (out / 'Discovery.swift').write_text('import Foundation\n' + source[source.index('struct Repository:'):source.index('struct OwnerProfile:')])
 (out / 'Owner.swift').write_text('import Foundation\n' + source[source.index('struct OwnerProfile:'):source.index('actor OwnerCache {')])
 (out / 'OwnerOrder.swift').write_text('import Foundation\n' + source[source.index('enum OwnerOrdering {'):source.index('@MainActor final class OwnerOrderPreferences:')])
-source = (repo / 'Notifications.swift').read_text()
+source = (repo / 'Sources' / 'Notifications.swift').read_text()
 (out / 'Inbox.swift').write_text(source[:source.index('@MainActor final class Inbox:')])
-source = (repo / 'Activity.swift').read_text()
+source = (repo / 'Sources' / 'Activity.swift').read_text()
 (out / 'Activity.swift').write_text(source[:source.index('@MainActor final class ActivityFeed:')])
-source = (repo / 'Agenda.swift').read_text()
+source = (repo / 'Sources' / 'Agenda.swift').read_text()
 (out / 'Agenda.swift').write_text('import Foundation\n' + source[source.index('struct AgendaProject:'):source.index('enum AgendaFailure:')])
 PY
 xcrun swiftc -parse-as-library "$check_dir/Owner.swift" "$check_dir/Inbox.swift" "$repo_dir/tests/InboxChecks.swift" -o "$check_dir/checks" -framework AppKit
