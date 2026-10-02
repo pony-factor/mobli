@@ -888,36 +888,41 @@ struct FolderSearchBar: View {
                     } else if results.isEmpty {
                         searchMessage("No matching folders")
                     } else {
-                        ForEach(results) { result in
-                            Button {
-                                select(result)
-                            } label: {
-                                HStack(spacing: 10) {
-                                    Image(systemName: "folder")
-                                        .font(.system(size: 13))
-                                        .foregroundStyle(Palette.muted)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(result.name)
-                                            .font(.system(size: 13, weight: .medium))
-                                            .lineLimit(1)
-                                        Text(result.parentPath)
-                                            .font(.system(size: 10))
-                                            .foregroundStyle(Palette.muted)
-                                            .lineLimit(1)
-                                            .truncationMode(.middle)
+                        ScrollView(.vertical) {
+                            VStack(spacing: 0) {
+                                ForEach(results) { result in
+                                    Button {
+                                        select(result)
+                                    } label: {
+                                        HStack(spacing: 10) {
+                                            Image(systemName: "folder")
+                                                .font(.system(size: 13))
+                                                .foregroundStyle(Palette.muted)
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(result.name)
+                                                    .font(.system(size: 13, weight: .medium))
+                                                    .lineLimit(1)
+                                                Text(result.parentPath)
+                                                    .font(.system(size: 10))
+                                                    .foregroundStyle(Palette.muted)
+                                                    .lineLimit(1)
+                                                    .truncationMode(.middle)
+                                            }
+                                            Spacer(minLength: 8)
+                                            Image(systemName: "arrow.up.right.square")
+                                                .font(.system(size: 11))
+                                                .foregroundStyle(Palette.muted)
+                                        }
+                                        .padding(.horizontal, 11)
+                                        .frame(height: 48)
+                                        .contentShape(Rectangle())
                                     }
-                                    Spacer(minLength: 8)
-                                    Image(systemName: "arrow.up.right.square")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(Palette.muted)
+                                    .buttonStyle(.plain)
+                                    .help("Open \(result.url.path) in VS Code")
                                 }
-                                .padding(.horizontal, 11)
-                                .padding(.vertical, 8)
-                                .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
-                            .help("Open \(result.url.path) in VS Code")
                         }
+                        .frame(height: min(CGFloat(results.count) * 48, 280))
                     }
                 }
                 .padding(.vertical, 4)
