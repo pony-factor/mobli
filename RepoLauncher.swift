@@ -230,6 +230,25 @@ enum RepositoryRanking {
     }
 }
 
+enum PinnedRepositoryOrdering {
+    static func ordered(_ repositories: [Repository], keys: [String]) -> [Repository] {
+        let byKey = Dictionary(repositories.map { ($0.usageKey, $0) }, uniquingKeysWith: { first, _ in first })
+        return keys.compactMap { byKey[$0] }
+    }
+
+    static func moving(_ source: String, relativeTo target: String, after: Bool, order: [String]) -> [String] {
+        guard source != target,
+              let sourceIndex = order.firstIndex(of: source),
+              order.contains(target) else { return order }
+        var next = order
+        next.remove(at: sourceIndex)
+        guard let targetIndex = next.firstIndex(of: target) else { return order }
+        next.insert(source, at: min(next.count, targetIndex + (after ? 1 : 0)))
+        return next
+    }
+}
+
+
 struct OwnerProfile: Codable, Sendable {
     let displayName: String
     let avatar: Data
@@ -486,14 +505,18 @@ enum OwnerOrdering {
 
 @MainActor final class RepositoryUsageStore: ObservableObject {
     @Published private var usage: [String: RepositoryUsage]
-    @Published private(set) var pinned: Set<String>
+    @Published private(set) var pinnedOrder: [String]
     private static let pinKey = "studio.repository-launcher.pinned-repositories"
     private let defaults: UserDefaults
     private static let key = "studio.repository-launcher.repository-usage"
 
+    var pinned: Set<String> { Set(pinnedOrder) }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        pinned = Set(defaults.stringArray(forKey: Self.pinKey) ?? [])
+        let savedPins = defaults.stringArray(forKey: Self.pinKey) ?? []
+        var seenPins = Set<String>()
+        pinnedOrder = savedPins.filter { seenPins.insert($0).inserted }
         if let data = defaults.data(forKey: Self.key),
            let saved = try? JSONDecoder().decode([String: RepositoryUsage].self, from: data) {
             usage = saved
@@ -508,9 +531,24 @@ enum OwnerOrdering {
 
     func isPinned(_ repository: Repository) -> Bool { pinned.contains(repository.usageKey) }
 
+    func pinnedRepositories(from repositories: [Repository]) -> [Repository] {
+        PinnedRepositoryOrdering.ordered(repositories.filter(\.isLocal), keys: pinnedOrder)
+    }
+
     func togglePin(_ repository: Repository) {
-        if !pinned.insert(repository.usageKey).inserted { pinned.remove(repository.usageKey) }
-        defaults.set(pinned.sorted(), forKey: Self.pinKey)
+        if let index = pinnedOrder.firstIndex(of: repository.usageKey) {
+            pinnedOrder.remove(at: index)
+        } else {
+            pinnedOrder.append(repository.usageKey)
+        }
+        defaults.set(pinnedOrder, forKey: Self.pinKey)
+    }
+
+    func movePinned(_ source: String, relativeTo target: String, after: Bool) {
+        let next = PinnedRepositoryOrdering.moving(source, relativeTo: target, after: after, order: pinnedOrder)
+        guard next != pinnedOrder else { return }
+        pinnedOrder = next
+        defaults.set(next, forKey: Self.pinKey)
     }
 
     func record(_ repository: Repository) {
@@ -777,6 +815,59 @@ struct RepositoryRow: View {
     }
 }
 
+struct PinnedRepositoryItem: View {
+    let repo: Repository
+    let profile: OwnerProfile?
+    let open: () -> Void
+    let togglePin: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Button(action: open) {
+                HStack(spacing: 8) {
+                    if let data = profile?.avatar, let image = NSImage(data: data) {
+                        Image(nsImage: image).resizable().scaledToFit()
+                            .frame(width: 22, height: 22).clipShape(RoundedRectangle(cornerRadius: 5))
+                    } else {
+                        Text(String(repo.owner.prefix(1)).uppercased())
+                            .font(.system(size: 11, weight: .bold))
+                            .frame(width: 22, height: 22)
+                            .background(Color.white.opacity(0.06))
+                            .clipShape(RoundedRectangle(cornerRadius: 5))
+                    }
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(repo.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                        Text(repo.owner).font(.system(size: 10)).foregroundStyle(Palette.muted).lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.leading, 10).padding(.vertical, 7)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Open \(repo.name) in a new VS Code window")
+
+            Button(action: togglePin) {
+                Image(systemName: "pin.slash")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.muted)
+                    .padding(9)
+            }
+            .buttonStyle(.plain)
+            .help("Unpin \(repo.name)")
+            .accessibilityLabel("Unpin \(repo.name)")
+        }
+        .frame(width: 210, height: 42)
+        .background(hovered ? Color.white.opacity(0.07) : Palette.column)
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .contentShape(Rectangle())
+        .onHover { hovered = $0 }
+        .contextMenu { Button("Unpin repository", action: togglePin) }
+    }
+}
+
 struct OwnerHeader: View {
     let owner: String
     let profile: OwnerProfile?
@@ -1028,6 +1119,7 @@ struct LauncherView: View {
     @State private var showingAgenda = false
     @State private var settings = false
     @State private var dropTarget: String?
+    @State private var pinnedDropTarget: String?
     @AppStorage("studio.repository-launcher.show-repository-counts") private var showRepositoryCounts = true
     @AppStorage("studio.repository-launcher.show-owner-slugs") private var showOwnerSlugs = true
     @State private var addingOrganization = false
@@ -1042,6 +1134,9 @@ struct LauncherView: View {
         notifications ? inbox.owners : library.owners + ownerOrder.manualOwners
     }
     private var owners: [String] { ownerOrder.ordered(availableOwners) }
+    private var pinnedRepositories: [Repository] {
+        repoUsage.pinnedRepositories(from: library.repos)
+    }
     var body: some View {
         VStack(spacing: 0) {
             ZStack {
@@ -1092,6 +1187,51 @@ struct LauncherView: View {
             if notifications, let message = inbox.message {
                 Text(message).font(.system(size: 12)).foregroundStyle(Palette.muted).padding(.horizontal, 24).padding(.bottom, 8)
             }
+            if !notifications && !pinnedRepositories.isEmpty {
+                VStack(spacing: 0) {
+                    HStack(spacing: 12) {
+                        Text("Pinned")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Palette.muted)
+                            .frame(width: 48, alignment: .leading)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(pinnedRepositories) { repo in
+                                    PinnedRepositoryItem(
+                                        repo: repo,
+                                        profile: library.profiles[repo.owner],
+                                        open: {
+                                            repoUsage.record(repo)
+                                            library.open(repo)
+                                        },
+                                        togglePin: { repoUsage.togglePin(repo) }
+                                    )
+                                    .draggable(repo.usageKey)
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: 7)
+                                            .stroke(pinnedDropTarget == repo.usageKey ? Palette.text : .clear, lineWidth: 2)
+                                    }
+                                    .dropDestination(for: String.self) { items, location in
+                                        guard let source = items.first,
+                                              repoUsage.pinned.contains(source),
+                                              source != repo.usageKey else { return false }
+                                        repoUsage.movePinned(source, relativeTo: repo.usageKey,
+                                                             after: location.x > 105)
+                                        return true
+                                    } isTargeted: { targeted in
+                                        if targeted { pinnedDropTarget = repo.usageKey }
+                                        else if pinnedDropTarget == repo.usageKey { pinnedDropTarget = nil }
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 8)
+                        }
+                    }
+                    .padding(.horizontal, 24)
+                    Rectangle().fill(Color.white.opacity(0.07)).frame(height: 1)
+                }
+                .frame(height: 58)
+            }
             GeometryReader { geometry in
                 let width: CGFloat = notifications ? 320 : 260
                 ScrollView(.horizontal) {
@@ -1108,8 +1248,11 @@ struct LauncherView: View {
                                         }.padding(.vertical, 4)
                                     }
                                 } else {
-                                    let repositories = repoUsage.ranked(library.repositories(for: owner))
-                                    OwnerHeader(owner: owner, profile: library.profiles[owner], subtitle: showRepositoryCounts ? "\(repositories.count) repos" : nil, showOwnerSlugs: showOwnerSlugs)
+                                    let ownerRepositories = library.repositories(for: owner)
+                                    let repositories = repoUsage.ranked(ownerRepositories.filter {
+                                        !repoUsage.isPinned($0) || !$0.isLocal
+                                    })
+                                    OwnerHeader(owner: owner, profile: library.profiles[owner], subtitle: showRepositoryCounts ? "\(ownerRepositories.count) repos" : nil, showOwnerSlugs: showOwnerSlugs)
                                         .draggable(owner).help("Drag to reorder organizations")
                                         .contextMenu {
                                             if ownerOrder.isManual(owner) {
@@ -1297,7 +1440,7 @@ struct LauncherView: View {
                         }
                     }
                 }
-                Text("Use the pin beside a local repository to keep it at the top. A cloud marks a GitHub repository that is not local yet; use its download button to clone it into ~/GitHub. Pins and organization order are saved automatically.")
+                Text("Pinned local repositories move into the draggable bar above the organization columns. A cloud marks a GitHub repository that is not local yet; use its download button to clone it into ~/GitHub. Pin order and organization order are saved automatically.")
                     .font(.system(size: 12)).foregroundStyle(Palette.muted)
             }
             .padding(24).frame(maxWidth: 650, alignment: .leading)

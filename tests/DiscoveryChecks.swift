@@ -32,6 +32,15 @@ import Foundation
         precondition(RepositoryRanking.ranked([stale, fresh], usage: [:],
                                               pinned: [stale.usageKey, fresh.usageKey]).first?.name == "fresh")
 
+        let pinOrder = [stale.usageKey, fresh.usageKey, orgB.usageKey]
+        precondition(PinnedRepositoryOrdering.ordered([fresh, orgB, stale], keys: pinOrder).map(\.usageKey) == pinOrder)
+        precondition(PinnedRepositoryOrdering.moving(stale.usageKey, relativeTo: orgB.usageKey,
+                                                     after: true, order: pinOrder)
+                     == [fresh.usageKey, orgB.usageKey, stale.usageKey])
+        precondition(PinnedRepositoryOrdering.moving(orgB.usageKey, relativeTo: stale.usageKey,
+                                                     after: false, order: pinOrder)
+                     == [orgB.usageKey, stale.usageKey, fresh.usageKey])
+
         // Opening an older project now must outrank both a new commit and frequent past use.
         let recentUsage = [
             stale.usageKey: RepositoryUsage(opens: 1, lastOpened: rankingNow),
