@@ -76,6 +76,27 @@ import Foundation
         try git(["remote", "remove", "origin"])
         discovered = try Discovery.scan(root)
         precondition(discovered[0].owner == "old-owner")
-        print("Discovery and activity-ranking checks passed")
+
+        let cacheDirectory = root.appendingPathComponent("launcher-cache")
+        let cache = RepositoryCache(directory: cacheDirectory)
+        precondition(cache.load(root: root) == nil)
+        try cache.save(RepositorySnapshot(root: root, repositories: [orgA, remoteOnly],
+                                          remoteRefreshedAt: rankingNow, remoteOwners: ["org-a"]))
+        // A new cache instance must restore both local and remote rows without Git or network access.
+        let restored = RepositoryCache(directory: cacheDirectory).load(root: root)
+        precondition(restored?.repositories.count == 2)
+        precondition(restored?.repositories.first?.url == orgA.url)
+        precondition(restored?.repositories.first?.lastActivityAt == sameActivity)
+        precondition(restored?.repositories.last?.cloneURL == remoteOnly.cloneURL)
+        precondition(restored?.remoteRefreshedAt == rankingNow)
+        precondition(restored?.remoteOwners == ["org-a"])
+        precondition(cache.load(root: root.appendingPathComponent("other-root")) == nil)
+        // A successful refresh replaces the previous catalog, including removed rows.
+        try cache.save(RepositorySnapshot(root: root, repositories: [fresh],
+                                          remoteRefreshedAt: nil, remoteOwners: []))
+        precondition(cache.load(root: root)?.repositories.map(\.name) == ["fresh"])
+        try Data("incomplete cache".utf8).write(to: cache.fileURL)
+        precondition(cache.load(root: root) == nil)
+        print("Discovery, activity-ranking, and persistent repository-cache checks passed")
     }
 }

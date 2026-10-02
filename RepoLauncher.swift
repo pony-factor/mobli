@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-struct Repository: Identifiable, Sendable {
+struct Repository: Identifiable, Codable, Sendable {
     let url: URL
     let owner: String
     let lastActivityAt: Date?
@@ -94,6 +94,34 @@ enum Discovery {
     static func merged(local: [Repository], remote: [Repository]) -> [Repository] {
         let localKeys = Set(local.map(\.usageKey))
         return local + remote.filter { !localKeys.contains($0.usageKey) }
+    }
+}
+
+struct RepositorySnapshot: Codable, Sendable {
+    let root: URL
+    let repositories: [Repository]
+    let remoteRefreshedAt: Date?
+    let remoteOwners: [String]
+}
+
+struct RepositoryCache {
+    let fileURL: URL
+
+    init(directory: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("studio.repository-launcher", isDirectory: true)) {
+        fileURL = directory.appendingPathComponent("repositories.json")
+    }
+
+    func load(root: URL) -> RepositorySnapshot? {
+        guard let data = try? Data(contentsOf: fileURL),
+              let snapshot = try? JSONDecoder().decode(RepositorySnapshot.self, from: data),
+              snapshot.root.standardizedFileURL.path == root.standardizedFileURL.path else { return nil }
+        return snapshot
+    }
+
+    func save(_ snapshot: RepositorySnapshot) throws {
+        try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(snapshot).write(to: fileURL, options: .atomic)
     }
 }
 
@@ -206,7 +234,7 @@ struct OwnerProfile: Codable, Sendable {
 
 actor OwnerCache {
     static let shared = OwnerCache()
-    private let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+    private static let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("studio.repository-launcher/owners", isDirectory: true)
 
     private struct GitHubOwner: Decodable {
@@ -214,16 +242,18 @@ actor OwnerCache {
         let avatar_url: URL
     }
 
-    private func cacheURL(_ owner: String) -> URL {
+    private static func cacheURL(_ owner: String) -> URL {
         // Encode the folder name so it cannot become a cache path.
         let key = Data(owner.lowercased().utf8).map { String(format: "%02x", $0) }.joined()
         return directory.appendingPathComponent(key + ".json")
     }
 
-    func cached(_ owner: String) -> OwnerProfile? {
+    nonisolated static func cachedProfile(_ owner: String) -> OwnerProfile? {
         guard let data = try? Data(contentsOf: cacheURL(owner)) else { return nil }
         return try? JSONDecoder().decode(OwnerProfile.self, from: data)
     }
+
+    func cached(_ owner: String) -> OwnerProfile? { Self.cachedProfile(owner) }
 
     private func download(_ url: URL, isAPI: Bool = false) async throws -> Data {
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
@@ -258,8 +288,8 @@ actor OwnerCache {
             let name = info.name?.trimmingCharacters(in: .whitespacesAndNewlines)
             let profile = OwnerProfile(displayName: name.flatMap { $0.isEmpty ? nil : $0 } ?? owner,
                                        avatar: avatar, fetchedAt: Date())
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try JSONEncoder().encode(profile).write(to: cacheURL(owner), options: .atomic)
+            try FileManager.default.createDirectory(at: Self.directory, withIntermediateDirectories: true)
+            try JSONEncoder().encode(profile).write(to: Self.cacheURL(owner), options: .atomic)
             return profile
         } catch {
             // Keep the last successful profile available while offline.
@@ -497,6 +527,29 @@ enum OwnerOrdering {
     @Published private(set) var cloning = Set<String>()
     private let root = URL(fileURLWithPath: NSHomeDirectory() + "/GitHub")
     private let remoteCatalog = GitHubRepositoryCatalog()
+    private let cache = RepositoryCache()
+    private var remoteRefreshedAt: Date?
+    private var remoteOwners: [String] = []
+
+    init() {
+        if let snapshot = cache.load(root: root) {
+            repos = snapshot.repositories
+            remoteRefreshedAt = snapshot.remoteRefreshedAt
+            remoteOwners = snapshot.remoteOwners
+        }
+        loadCachedProfiles()
+    }
+
+    private func loadCachedProfiles(additionalOwners: [String] = []) {
+        for owner in Set(owners + additionalOwners) where profiles[owner] == nil {
+            if let profile = OwnerCache.cachedProfile(owner) { profiles[owner] = profile }
+        }
+    }
+
+    private func saveRepositories() {
+        try? cache.save(RepositorySnapshot(root: root, repositories: repos,
+                                          remoteRefreshedAt: remoteRefreshedAt, remoteOwners: remoteOwners))
+    }
     var owners: [String] {
         Array(Set(repos.map(\.owner))).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
@@ -516,22 +569,31 @@ enum OwnerOrdering {
         do {
             let scanRoot = root
             let local = try await Task.detached { try Discovery.scan(scanRoot) }.value
-            do {
-                let remote = try await remoteCatalog.repositories(root: scanRoot, priorityOwners: priorityOwners)
-                repos = Discovery.merged(local: local, remote: remote)
-                githubMessage = nil
-            } catch {
-                repos = local
-                githubMessage = error.localizedDescription
+            // Publish local changes without waiting for GitHub; retain the last remote catalog.
+            let cachedRemote = repos.filter { !$0.isLocal }
+            repos = Discovery.merged(local: local, remote: cachedRemote)
+            loadCachedProfiles(additionalOwners: priorityOwners)
+            saveRepositories()
+            let recentRemote = remoteRefreshedAt.map { Date().timeIntervalSince($0) < 5 * 60 } ?? false
+            let requestedOwners = Set(priorityOwners.map { $0.lowercased() })
+            if forceProfiles || !recentRemote || !requestedOwners.isSubset(of: Set(remoteOwners)) {
+                do {
+                    let remote = try await remoteCatalog.repositories(root: scanRoot, priorityOwners: priorityOwners)
+                    repos = Discovery.merged(local: local, remote: remote)
+                    remoteRefreshedAt = Date()
+                    remoteOwners = Array(requestedOwners)
+                    loadCachedProfiles(additionalOwners: priorityOwners)
+                    saveRepositories()
+                    githubMessage = nil
+                } catch {
+                    githubMessage = error.localizedDescription
+                }
             }
             error = nil
         }
         catch { self.error = "Couldn’t read \(root.path): \(error.localizedDescription)" }
         profiles = profiles.filter { owners.contains($0.key) }
-        // Show disk-cached names and logos before any network request finishes.
-        for owner in owners {
-            if let profile = await OwnerCache.shared.cached(owner) { profiles[owner] = profile }
-        }
+        loadCachedProfiles(additionalOwners: priorityOwners)
         await withTaskGroup(of: (String, OwnerProfile?).self) { group in
             for owner in owners {
                 group.addTask { (owner, await OwnerCache.shared.profile(owner, force: forceProfiles)) }
