@@ -215,6 +215,25 @@ enum RepositoryRanking {
     }
 }
 
+enum PinnedRepositoryOrdering {
+    static func ordered(_ repositories: [Repository], keys: [String]) -> [Repository] {
+        let byKey = Dictionary(repositories.map { ($0.usageKey, $0) }, uniquingKeysWith: { first, _ in first })
+        return keys.compactMap { byKey[$0] }
+    }
+
+    static func moving(_ source: String, relativeTo target: String, after: Bool, order: [String]) -> [String] {
+        guard source != target,
+              let sourceIndex = order.firstIndex(of: source),
+              order.contains(target) else { return order }
+        var next = order
+        next.remove(at: sourceIndex)
+        guard let targetIndex = next.firstIndex(of: target) else { return order }
+        next.insert(source, at: min(next.count, targetIndex + (after ? 1 : 0)))
+        return next
+    }
+}
+
+
 struct OwnerProfile: Codable, Sendable {
     let displayName: String
     let avatar: Data
@@ -466,24 +485,6 @@ enum OwnerOrdering {
         guard next != preferred else { return }
         preferred = next
         defaults.set(next, forKey: Self.key)
-    }
-}
-
-enum PinnedRepositoryOrdering {
-    static func ordered(_ repositories: [Repository], keys: [String]) -> [Repository] {
-        let byKey = Dictionary(repositories.map { ($0.usageKey, $0) }, uniquingKeysWith: { first, _ in first })
-        return keys.compactMap { byKey[$0] }
-    }
-
-    static func moving(_ source: String, relativeTo target: String, after: Bool, order: [String]) -> [String] {
-        guard source != target,
-              let sourceIndex = order.firstIndex(of: source),
-              order.contains(target) else { return order }
-        var next = order
-        next.remove(at: sourceIndex)
-        guard let targetIndex = next.firstIndex(of: target) else { return order }
-        next.insert(source, at: min(next.count, targetIndex + (after ? 1 : 0)))
-        return next
     }
 }
 
