@@ -601,13 +601,20 @@ enum OwnerOrdering {
         task.arguments = ["--new-window", url.path]
         task.standardOutput = FileHandle.nullDevice
         task.standardError = FileHandle.nullDevice
+        let windows = NSApplication.shared.windows.filter { $0.isVisible && !$0.isMiniaturized }
         task.terminationHandler = { process in
             if process.terminationStatus != 0 {
-                Task { @MainActor in self.error = "VS Code couldn’t open \(displayName). Try again." }
+                Task { @MainActor in
+                    self.error = "VS Code couldn’t open \(displayName). Try again."
+                    NSApplication.shared.unhide(nil)
+                    for window in windows { window.deminiaturize(nil) }
+                    NSApplication.shared.activate(ignoringOtherApps: true)
+                }
             }
         }
         do {
             try task.run()
+            for window in windows { window.miniaturize(nil) }
             NSApplication.shared.hide(nil)
         } catch { self.error = error.localizedDescription }
     }
