@@ -5,11 +5,20 @@ struct Repository: Identifiable, Sendable {
     let url: URL
     let owner: String
     let lastActivityAt: Date?
+    let cloneURL: URL?
+
+    init(url: URL, owner: String, lastActivityAt: Date?, cloneURL: URL? = nil) {
+        self.url = url
+        self.owner = owner
+        self.lastActivityAt = lastActivityAt
+        self.cloneURL = cloneURL
+    }
 
     var id: String { url.path }
     var name: String { url.lastPathComponent }
     var fullName: String { owner + "/" + name }
     var usageKey: String { fullName.lowercased() }
+    var isLocal: Bool { cloneURL == nil }
 }
 
 enum Discovery {
@@ -80,6 +89,11 @@ enum Discovery {
             }
         }
         return repos
+    }
+
+    static func merged(local: [Repository], remote: [Repository]) -> [Repository] {
+        let localKeys = Set(local.map(\.usageKey))
+        return local + remote.filter { !localKeys.contains($0.usageKey) }
     }
 }
 
@@ -197,6 +211,107 @@ actor OwnerCache {
     }
 }
 
+
+
+enum GitHubRepositoryFailure: LocalizedError {
+    case unavailable
+    case request
+
+    var errorDescription: String? {
+        switch self {
+        case .unavailable: return "Connect GitHub with the GitHub CLI to load repositories that are not local yet."
+        case .request: return "Couldn’t refresh connected GitHub repositories."
+        }
+    }
+}
+
+actor GitHubRepositoryCatalog {
+    private struct RemoteRepository: Decodable {
+        struct Owner: Decodable { let login: String }
+        let name: String
+        let clone_url: URL
+        let pushed_at: String?
+        let updated_at: String?
+        let owner: Owner
+    }
+
+    private let dateFormatter = ISO8601DateFormatter()
+
+    private func request(_ endpoint: String) async throws -> [RemoteRepository] {
+        guard let executable = GitHubInbox.executable else { throw GitHubRepositoryFailure.unavailable }
+        let arguments = [
+            "api", "--hostname", "github.com",
+            "-H", "Accept: application/vnd.github+json",
+            "-H", "X-GitHub-Api-Version: 2022-11-28",
+            endpoint,
+        ]
+        let result = try await Task.detached { () -> (Data, Int32) in
+            let process = Process()
+            let output = Pipe()
+            process.executableURL = URL(fileURLWithPath: executable)
+            process.arguments = arguments
+            process.standardOutput = output
+            process.standardError = FileHandle.nullDevice
+            process.standardInput = FileHandle.nullDevice
+            try process.run()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            return (data, process.terminationStatus)
+        }.value
+        guard result.1 == 0 else { throw GitHubRepositoryFailure.request }
+        do {
+            return try JSONDecoder().decode([RemoteRepository].self, from: result.0)
+        } catch {
+            throw GitHubRepositoryFailure.request
+        }
+    }
+
+    private func pages(_ endpoint: (Int) -> String) async throws -> [RemoteRepository] {
+        var repositories: [RemoteRepository] = []
+        var page = 1
+        while true {
+            let batch = try await request(endpoint(page))
+            repositories += batch
+            if batch.count < 100 { break }
+            page += 1
+        }
+        return repositories
+    }
+
+    func repositories(root: URL, priorityOwners: [String]) async throws -> [Repository] {
+        var repositories = try await pages {
+            "/user/repos?affiliation=owner,collaborator,organization_member&sort=updated&direction=desc&per_page=100&page=\($0)"
+        }
+        let accessibleOwners = Set(repositories.map { $0.owner.login.lowercased() })
+        var requestedOwners = Set<String>()
+        for owner in priorityOwners {
+            let trimmed = owner.trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = trimmed.lowercased()
+            guard !trimmed.isEmpty, !accessibleOwners.contains(key), requestedOwners.insert(key).inserted else { continue }
+            repositories += try await pages {
+                "/users/\(trimmed)/repos?sort=updated&direction=desc&per_page=100&page=\($0)"
+            }
+        }
+
+        var seen = Set<String>()
+        return repositories.compactMap { repository in
+            let owner = repository.owner.login
+            let name = repository.name
+            guard owner.range(of: "^[A-Za-z0-9-]+$", options: .regularExpression) != nil,
+                  name != ".", name != "..",
+                  name.range(of: "^[A-Za-z0-9._-]+$", options: .regularExpression) != nil else { return nil }
+            let fullName = (owner + "/" + name).lowercased()
+            guard seen.insert(fullName).inserted else { return nil }
+            let activity = [repository.pushed_at, repository.updated_at]
+                .compactMap { $0.flatMap(dateFormatter.date(from:)) }
+                .max()
+            let destination = root.appendingPathComponent(owner, isDirectory: true)
+                .appendingPathComponent(name, isDirectory: true)
+            return Repository(url: destination, owner: owner, lastActivityAt: activity,
+                              cloneURL: repository.clone_url)
+        }
+    }
+}
 
 enum OwnerOrdering {
     static func ordered(_ owners: [String], preferred: [String]) -> [String] {
@@ -320,15 +435,18 @@ enum OwnerOrdering {
     @Published var repos: [Repository] = []
     @Published var profiles: [String: OwnerProfile] = [:]
     @Published var error: String?
+    @Published var githubMessage: String?
     @Published private(set) var refreshing = false
+    @Published private(set) var cloning = Set<String>()
     private let root = URL(fileURLWithPath: NSHomeDirectory() + "/GitHub")
+    private let remoteCatalog = GitHubRepositoryCatalog()
     var owners: [String] {
         Array(Set(repos.map(\.owner))).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
     func repositories(for owner: String) -> [Repository] {
         repos.filter { $0.owner == owner }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
-    func refresh(forceProfiles: Bool = false) async {
+    func refresh(forceProfiles: Bool = false, priorityOwners: [String] = []) async {
         if refreshing {
             guard forceProfiles else { return }
             while refreshing {
@@ -340,7 +458,15 @@ enum OwnerOrdering {
         defer { refreshing = false }
         do {
             let scanRoot = root
-            repos = try await Task.detached { try Discovery.scan(scanRoot) }.value
+            let local = try await Task.detached { try Discovery.scan(scanRoot) }.value
+            do {
+                let remote = try await remoteCatalog.repositories(root: scanRoot, priorityOwners: priorityOwners)
+                repos = Discovery.merged(local: local, remote: remote)
+                githubMessage = nil
+            } catch {
+                repos = local
+                githubMessage = error.localizedDescription
+            }
             error = nil
         }
         catch { self.error = "Couldn’t read \(root.path): \(error.localizedDescription)" }
@@ -358,6 +484,48 @@ enum OwnerOrdering {
             }
         }
     }
+    func clone(_ repo: Repository) async {
+        guard !repo.isLocal else { open(repo); return }
+        guard let executable = GitHubInbox.executable else {
+            githubMessage = GitHubRepositoryFailure.unavailable.localizedDescription
+            return
+        }
+        let key = repo.usageKey
+        var next = cloning
+        guard next.insert(key).inserted else { return }
+        cloning = next
+        defer { cloning = cloning.subtracting([key]) }
+
+        let destination = repo.url
+        do {
+            try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(),
+                                                    withIntermediateDirectories: true)
+            guard !FileManager.default.fileExists(atPath: destination.path) else {
+                error = "A folder already exists at \(destination.path)."
+                return
+            }
+            let fullName = repo.fullName
+            let status = try await Task.detached { () -> Int32 in
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: executable)
+                process.arguments = ["repo", "clone", fullName, destination.path]
+                process.standardOutput = FileHandle.nullDevice
+                process.standardError = FileHandle.nullDevice
+                process.standardInput = FileHandle.nullDevice
+                try process.run()
+                process.waitUntilExit()
+                return process.terminationStatus
+            }.value
+            guard status == 0 else {
+                error = "GitHub couldn’t clone \(repo.fullName). Check repository access and try again."
+                return
+            }
+            await refresh(priorityOwners: owners)
+        } catch {
+            self.error = "Couldn’t clone \(repo.fullName): \(error.localizedDescription)"
+        }
+    }
+
     func open(_ repo: Repository) {
         let candidates = ["/Applications/Visual Studio Code.app", NSHomeDirectory() + "/Applications/Visual Studio Code.app"]
         guard let app = candidates.first(where: { FileManager.default.fileExists(atPath: $0 + "/Contents/Resources/app/bin/code") }) else {
@@ -389,40 +557,80 @@ enum Palette {
 struct RepositoryRow: View {
     let repo: Repository
     let pinned: Bool
+    let cloning: Bool
     let togglePin: () -> Void
     let open: () -> Void
+    let clone: () -> Void
     @State private var hovered = false
+
     var body: some View {
         HStack(spacing: 0) {
-            Button(action: open) {
+            if repo.isLocal {
+                Button(action: open) {
+                    HStack(spacing: 8) {
+                        Text(repo.name).font(.system(size: 15, weight: .medium)).lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                        Spacer(minLength: 0)
+                        if hovered { Image(systemName: "arrow.up.right").font(.system(size: 10)) }
+                    }
+                    .foregroundStyle(hovered ? Color.white : Palette.text)
+                    .padding(.horizontal, 12).padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(hovered ? Color.white.opacity(0.07) : Color.clear)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(repo.name)
+                .onHover { hovered = $0 }
+                .help("Open \(repo.name) in a new VS Code window")
+            } else {
                 HStack(spacing: 8) {
+                    Image(systemName: "cloud")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.muted)
                     Text(repo.name).font(.system(size: 15, weight: .medium)).lineLimit(2)
                         .multilineTextAlignment(.leading)
                     Spacer(minLength: 0)
-                    if hovered { Image(systemName: "arrow.up.right").font(.system(size: 10)) }
                 }
-                .foregroundStyle(hovered ? Color.white : Palette.text)
+                .foregroundStyle(Palette.text)
                 .padding(.horizontal, 12).padding(.vertical, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(hovered ? Color.white.opacity(0.07) : Color.clear)
-                .contentShape(Rectangle())
+                .help("Available on GitHub; not cloned locally")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(repo.name)
-            .onHover { hovered = $0 }
-            .help("Open \(repo.name) in a new VS Code window")
-            Button(action: togglePin) {
-                Image(systemName: pinned ? "pin.fill" : "pin")
-                    .font(.system(size: 12))
-                    .foregroundStyle(pinned ? Palette.text : Palette.muted)
-                    .padding(10)
+
+            if repo.isLocal {
+                Button(action: togglePin) {
+                    Image(systemName: pinned ? "pin.fill" : "pin")
+                        .font(.system(size: 12))
+                        .foregroundStyle(pinned ? Palette.text : Palette.muted)
+                        .padding(10)
+                }
+                .buttonStyle(.plain)
+                .help(pinned ? "Unpin repository" : "Pin repository to the top")
+                .accessibilityLabel(pinned ? "Unpin \(repo.name)" : "Pin \(repo.name)")
+            } else {
+                Button(action: clone) {
+                    if cloning {
+                        ProgressView().controlSize(.small).padding(8)
+                    } else {
+                        Image(systemName: "arrow.down.circle")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Palette.muted)
+                            .padding(10)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(cloning)
+                .help("Clone \(repo.fullName) into ~/GitHub/\(repo.owner)/\(repo.name)")
+                .accessibilityLabel("Clone \(repo.name)")
             }
-            .buttonStyle(.plain)
-            .help(pinned ? "Unpin repository" : "Pin repository to the top")
-            .accessibilityLabel(pinned ? "Unpin \(repo.name)" : "Pin \(repo.name)")
         }
         .contextMenu {
-            Button(pinned ? "Unpin repository" : "Pin repository", action: togglePin)
+            if repo.isLocal {
+                Button(pinned ? "Unpin repository" : "Pin repository", action: togglePin)
+            } else {
+                Button("Clone repository", action: clone).disabled(cloning)
+            }
         }
     }
 }
@@ -616,11 +824,17 @@ struct LauncherView: View {
                                     ScrollView(.vertical) {
                                         LazyVStack(alignment: .leading, spacing: 0) {
                                             ForEach(repositories) { repo in
-                                                RepositoryRow(repo: repo, pinned: repoUsage.isPinned(repo),
-                                                              togglePin: { repoUsage.togglePin(repo) }) {
-                                                    repoUsage.record(repo)
-                                                    library.open(repo)
-                                                }
+                                                RepositoryRow(
+                                                    repo: repo,
+                                                    pinned: repoUsage.isPinned(repo),
+                                                    cloning: library.cloning.contains(repo.usageKey),
+                                                    togglePin: { repoUsage.togglePin(repo) },
+                                                    open: {
+                                                        repoUsage.record(repo)
+                                                        library.open(repo)
+                                                    },
+                                                    clone: { Task { await library.clone(repo) } }
+                                                )
                                             }
                                         }
                                         .padding(.vertical, 4)
@@ -669,10 +883,10 @@ struct LauncherView: View {
         }
         .background(Palette.background).foregroundStyle(Palette.text).preferredColorScheme(.dark)
         .frame(minWidth: 650, minHeight: 400)
-        .task { await library.refresh() }
+        .task { await library.refresh(priorityOwners: ownerOrder.manualOwners) }
         .task(id: settings) {
             guard settings else { return }
-            async let repositories: Void = library.refresh(forceProfiles: true)
+            async let repositories: Void = library.refresh(forceProfiles: true, priorityOwners: ownerOrder.manualOwners)
             async let notifications: Void = inbox.refresh()
             _ = await (repositories, notifications)
             for owner in ownerOrder.manualOwners where !library.owners.contains(owner) {
@@ -690,7 +904,7 @@ struct LauncherView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
-                Task { if notifications { await inbox.refresh() } else { await library.refresh() } }
+                Task { if notifications { await inbox.refresh() } else { await library.refresh(priorityOwners: ownerOrder.manualOwners) } }
             }
         }
         .sheet(isPresented: $addingOrganization) {
@@ -724,9 +938,12 @@ struct LauncherView: View {
             VStack(alignment: .leading, spacing: 24) {
                 Text("Settings").font(.system(size: 22, weight: .semibold))
                 Text(library.refreshing || inbox.loading
-                     ? "Refreshing repositories, owner profiles, and notifications…"
-                     : "Opening Settings refreshes repositories, owner profiles, and notifications.")
+                     ? "Refreshing local and GitHub repositories, owner profiles, and notifications…"
+                     : "Opening Settings refreshes local and GitHub repositories, owner profiles, and notifications.")
                     .font(.system(size: 12)).foregroundStyle(Palette.muted)
+                if let githubMessage = library.githubMessage {
+                    Text(githubMessage).font(.system(size: 12)).foregroundStyle(Palette.muted)
+                }
                 Toggle("Show repository counts in each category", isOn: $showRepositoryCounts)
                 Toggle("Show GitHub owner slugs beneath display names", isOn: $showOwnerSlugs)
                 VStack(alignment: .leading, spacing: 12) {
@@ -751,7 +968,7 @@ struct LauncherView: View {
                         }
                     }
                 }
-                Text("Use the pin beside a repository to keep it at the top of its category. Your pins and organization order are saved automatically.")
+                Text("Use the pin beside a local repository to keep it at the top. A cloud marks a GitHub repository that is not local yet; use its download button to clone it into ~/GitHub. Pins and organization order are saved automatically.")
                     .font(.system(size: 12)).foregroundStyle(Palette.muted)
             }
             .padding(24).frame(maxWidth: 650, alignment: .leading)
@@ -771,6 +988,7 @@ struct LauncherView: View {
             if let profile = await OwnerCache.shared.profile(owner) {
                 library.profiles[owner] = profile
             }
+            await library.refresh(priorityOwners: ownerOrder.manualOwners)
         }
     }
 
