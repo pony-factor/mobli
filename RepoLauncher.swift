@@ -843,7 +843,7 @@ struct FolderSearchBar: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12))
-                .foregroundStyle(Palette.muted)
+                .foregroundStyle(focused ? Palette.text : Palette.muted)
             TextField("Folders", text: $query)
                 .textFieldStyle(.plain)
                 .focused($focused)
@@ -868,11 +868,14 @@ struct FolderSearchBar: View {
         }
         .padding(.horizontal, 11)
         .frame(height: 32)
-        .background(Palette.column)
+        .background(focused ? Color(red: 0.13, green: 0.15, blue: 0.19) : Palette.column)
         .clipShape(RoundedRectangle(cornerRadius: 7))
+        .contentShape(Rectangle())
+        .onTapGesture { focused = true }
         .overlay {
             RoundedRectangle(cornerRadius: 7)
-                .stroke(Color.white.opacity(focused ? 0.20 : 0.08), lineWidth: 1)
+                .stroke(focused ? Color.accentColor : Color.white.opacity(0.08),
+                        lineWidth: focused ? 2 : 1)
         }
         .overlay(alignment: .top) {
             if focused && hasQuery {
