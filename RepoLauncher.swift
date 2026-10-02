@@ -97,6 +97,63 @@ enum Discovery {
     }
 }
 
+
+struct FolderSearchResult: Identifiable, Sendable {
+    let url: URL
+
+    var id: String { url.path }
+    var name: String { url.lastPathComponent }
+    var parentPath: String { url.deletingLastPathComponent().path }
+}
+
+enum FolderSearchFailure: LocalizedError {
+    case unavailable
+
+    var errorDescription: String? {
+        "Couldn’t search folders with Spotlight."
+    }
+}
+
+enum FolderSearch {
+    static func search(_ rawQuery: String, limit: Int = 16) async throws -> [FolderSearchResult] {
+        let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return [] }
+
+        let escaped = query
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let predicate = "kMDItemContentType == 'public.folder' && kMDItemFSName == \"*\(escaped)*\"cd"
+
+        return try await Task.detached {
+            let process = Process()
+            let output = Pipe()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/mdfind")
+            process.arguments = [predicate]
+            process.standardOutput = output
+            process.standardError = FileHandle.nullDevice
+            process.standardInput = FileHandle.nullDevice
+            try process.run()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { throw FolderSearchFailure.unavailable }
+
+            let text = String(decoding: data, as: UTF8.self)
+            var seen = Set<String>()
+            var results: [FolderSearchResult] = []
+            for line in text.split(whereSeparator: \.isNewline) {
+                let path = String(line)
+                guard seen.insert(path).inserted else { continue }
+                var isDirectory: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+                      isDirectory.boolValue else { continue }
+                results.append(FolderSearchResult(url: URL(fileURLWithPath: path, isDirectory: true)))
+                if results.count >= limit { break }
+            }
+            return results
+        }.value
+    }
+}
+
 struct RepositoryUsage: Codable, Equatable {
     var opens: Int
     var lastOpened: Date?
@@ -527,18 +584,26 @@ enum OwnerOrdering {
     }
 
     func open(_ repo: Repository) {
+        openInVSCode(repo.url, displayName: repo.name)
+    }
+
+    func openFolder(_ url: URL) {
+        openInVSCode(url, displayName: url.lastPathComponent)
+    }
+
+    private func openInVSCode(_ url: URL, displayName: String) {
         let candidates = ["/Applications/Visual Studio Code.app", NSHomeDirectory() + "/Applications/Visual Studio Code.app"]
         guard let app = candidates.first(where: { FileManager.default.fileExists(atPath: $0 + "/Contents/Resources/app/bin/code") }) else {
-            error = "Install Visual Studio Code in Applications to open repositories."; return
+            error = "Install Visual Studio Code in Applications to open folders."; return
         }
         let task = Process()
         task.executableURL = URL(fileURLWithPath: app + "/Contents/Resources/app/bin/code")
-        task.arguments = ["--new-window", repo.url.path]
+        task.arguments = ["--new-window", url.path]
         task.standardOutput = FileHandle.nullDevice
         task.standardError = FileHandle.nullDevice
         task.terminationHandler = { process in
             if process.terminationStatus != 0 {
-                Task { @MainActor in self.error = "VS Code couldn’t open \(repo.name). Try again." }
+                Task { @MainActor in self.error = "VS Code couldn’t open \(displayName). Try again." }
             }
         }
         do {
@@ -701,6 +766,129 @@ struct AddOrganizationCard: View {
     }
 }
 
+
+struct FolderSearchBar: View {
+    @Binding var query: String
+    let results: [FolderSearchResult]
+    let searching: Bool
+    let message: String?
+    let open: (FolderSearchResult) -> Void
+    @FocusState private var focused: Bool
+
+    private var hasQuery: Bool {
+        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
+            TextField("Search folders on this Mac", text: $query)
+                .textFieldStyle(.plain)
+                .focused($focused)
+                .onSubmit {
+                    if let first = results.first {
+                        select(first)
+                    }
+                }
+            if searching {
+                ProgressView().controlSize(.small)
+            } else if hasQuery {
+                Button {
+                    query = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.muted)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear folder search")
+            }
+        }
+        .padding(.horizontal, 11)
+        .frame(height: 32)
+        .background(Palette.column)
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .overlay {
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(Color.white.opacity(focused ? 0.20 : 0.08), lineWidth: 1)
+        }
+        .overlay(alignment: .top) {
+            if focused && hasQuery {
+                VStack(spacing: 0) {
+                    if searching && results.isEmpty {
+                        searchMessage("Searching folders…")
+                    } else if let message {
+                        searchMessage(message)
+                    } else if results.isEmpty {
+                        searchMessage("No matching folders")
+                    } else {
+                        ForEach(results) { result in
+                            Button {
+                                select(result)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "folder")
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(Palette.muted)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(result.name)
+                                            .font(.system(size: 13, weight: .medium))
+                                            .lineLimit(1)
+                                        Text(result.parentPath)
+                                            .font(.system(size: 10))
+                                            .foregroundStyle(Palette.muted)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                    }
+                                    Spacer(minLength: 8)
+                                    Image(systemName: "arrow.up.right.square")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(Palette.muted)
+                                }
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 8)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("Open \(result.url.path) in VS Code")
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+                .frame(width: 440)
+                .background(Palette.column)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                }
+                .shadow(radius: 14)
+                .offset(y: 36)
+            }
+        }
+        .onExitCommand { focused = false }
+        .zIndex(20)
+    }
+
+    @ViewBuilder
+    private func searchMessage(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 12))
+            .foregroundStyle(Palette.muted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 10)
+    }
+
+    private func select(_ result: FolderSearchResult) {
+        open(result)
+        query = ""
+        focused = false
+    }
+}
+
 struct ThinRepositoryScrollbars: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
@@ -760,6 +948,10 @@ struct LauncherView: View {
     @State private var addingOrganization = false
     @State private var newOrganization = ""
     @State private var addOrganizationError: String?
+    @State private var folderQuery = ""
+    @State private var folderResults: [FolderSearchResult] = []
+    @State private var folderSearching = false
+    @State private var folderSearchMessage: String?
     @Environment(\.scenePhase) private var scenePhase
     private var availableOwners: [String] {
         notifications ? inbox.owners : library.owners + ownerOrder.manualOwners
@@ -767,29 +959,40 @@ struct LauncherView: View {
     private var owners: [String] { ownerOrder.ordered(availableOwners) }
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 20) {
-                tab("Repositories", selected: !notifications && !settings) { notifications = false; settings = false }
-                Spacer()
-                if library.refreshing || inbox.loading { ProgressView().controlSize(.small) }
-                if notifications && !settings {
-                    Button("Connect GitHub", action: inbox.connect).buttonStyle(.plain).font(.system(size: 12))
+            ZStack {
+                HStack(spacing: 20) {
+                    tab("Repositories", selected: !notifications && !settings) { notifications = false; settings = false }
+                    Spacer()
+                    if library.refreshing || inbox.loading { ProgressView().controlSize(.small) }
+                    if notifications && !settings {
+                        Button("Connect GitHub", action: inbox.connect).buttonStyle(.plain).font(.system(size: 12))
+                    }
+                    tab("Notifications", selected: notifications && !settings) { notifications = true; settings = false }
+                    Button { settings = true } label: {
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 14, weight: settings ? .semibold : .regular))
+                            .foregroundStyle(settings ? Palette.text : Palette.muted)
+                            .padding(.bottom, 6)
+                            .overlay(alignment: .bottom) {
+                                if settings { Rectangle().fill(Palette.text).frame(height: 2) }
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .focusable(false)
+                    .focusEffectDisabled()
+                    .accessibilityLabel("Settings")
+                    .help("Settings")
                 }
-                tab("Notifications", selected: notifications && !settings) { notifications = true; settings = false }
-                Button { settings = true } label: {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 14, weight: settings ? .semibold : .regular))
-                        .foregroundStyle(settings ? Palette.text : Palette.muted)
-                        .padding(.bottom, 6)
-                        .overlay(alignment: .bottom) {
-                            if settings { Rectangle().fill(Palette.text).frame(height: 2) }
-                        }
+                FolderSearchBar(query: $folderQuery, results: folderResults,
+                                searching: folderSearching, message: folderSearchMessage) { result in
+                    folderResults = []
+                    folderSearchMessage = nil
+                    library.openFolder(result.url)
                 }
-                .buttonStyle(.plain)
-                .focusable(false)
-                .focusEffectDisabled()
-                .accessibilityLabel("Settings")
-                .help("Settings")
-            }.padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 12)
+                .frame(width: 440)
+            }
+            .zIndex(50)
+            .padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 12)
             if settings {
                 settingsPage
             } else {
@@ -885,6 +1088,31 @@ struct LauncherView: View {
         .background(Palette.background).foregroundStyle(Palette.text).preferredColorScheme(.dark)
         .frame(minWidth: 650, minHeight: 400)
         .task { await library.refresh(priorityOwners: ownerOrder.manualOwners) }
+        .task(id: folderQuery) {
+            let query = folderQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !query.isEmpty else {
+                folderResults = []
+                folderSearchMessage = nil
+                folderSearching = false
+                return
+            }
+            folderSearching = true
+            folderSearchMessage = nil
+            do {
+                try await Task.sleep(for: .milliseconds(180))
+                guard !Task.isCancelled else { return }
+                let results = try await FolderSearch.search(query)
+                guard !Task.isCancelled else { return }
+                folderResults = results
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled else { return }
+                folderResults = []
+                folderSearchMessage = error.localizedDescription
+            }
+            if !Task.isCancelled { folderSearching = false }
+        }
         .task(id: settings) {
             guard settings else { return }
             async let repositories: Void = library.refresh(forceProfiles: true, priorityOwners: ownerOrder.manualOwners)
