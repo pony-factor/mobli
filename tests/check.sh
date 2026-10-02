@@ -2,7 +2,7 @@
 set -eu
 repo_dir=${0:A:h:h}
 check_dir=$(mktemp -d /tmp/mobli-checks.XXXXXX)
-trap 'rm -f "$check_dir/Owner.swift" "$check_dir/Inbox.swift" "$check_dir/checks" "$check_dir/Discovery.swift" "$check_dir/discovery-checks" "$check_dir/OwnerOrder.swift" "$check_dir/owner-order-checks"; rmdir "$check_dir"' EXIT
+trap 'rm -f "$check_dir/Owner.swift" "$check_dir/Inbox.swift" "$check_dir/checks" "$check_dir/Discovery.swift" "$check_dir/discovery-checks" "$check_dir/OwnerOrder.swift" "$check_dir/owner-order-checks" "$check_dir/Agenda.swift" "$check_dir/agenda-checks"; rmdir "$check_dir"' EXIT
 python3 - "$repo_dir" "$check_dir" <<'PY'
 from pathlib import Path
 import sys
@@ -13,6 +13,8 @@ source = (repo / 'RepoLauncher.swift').read_text()
 (out / 'OwnerOrder.swift').write_text('import Foundation\n' + source[source.index('enum OwnerOrdering {'):source.index('@MainActor final class OwnerOrderPreferences:')])
 source = (repo / 'Notifications.swift').read_text()
 (out / 'Inbox.swift').write_text(source[:source.index('@MainActor final class Inbox:')])
+source = (repo / 'Agenda.swift').read_text()
+(out / 'Agenda.swift').write_text('import Foundation\n' + source[source.index('struct AgendaProject:'):source.index('enum AgendaFailure:')])
 PY
 xcrun swiftc -parse-as-library "$check_dir/Owner.swift" "$check_dir/Inbox.swift" "$repo_dir/tests/InboxChecks.swift" -o "$check_dir/checks" -framework AppKit
 "$check_dir/checks"
@@ -22,3 +24,6 @@ xcrun swiftc -parse-as-library "$check_dir/Discovery.swift" "$repo_dir/tests/Dis
 
 xcrun swiftc -parse-as-library "$check_dir/OwnerOrder.swift" "$repo_dir/tests/OwnerOrderChecks.swift" -o "$check_dir/owner-order-checks"
 "$check_dir/owner-order-checks"
+
+xcrun swiftc -parse-as-library "$check_dir/Agenda.swift" "$repo_dir/tests/AgendaChecks.swift" -o "$check_dir/agenda-checks"
+"$check_dir/agenda-checks"

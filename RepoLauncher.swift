@@ -1010,6 +1010,7 @@ struct LauncherView: View {
     @StateObject private var ownerOrder = OwnerOrderPreferences()
     @StateObject private var repoUsage = RepositoryUsageStore()
     @State private var notifications = false
+    @State private var showingAgenda = false
     @State private var settings = false
     @State private var dropTarget: String?
     @AppStorage("studio.repository-launcher.show-repository-counts") private var showRepositoryCounts = true
@@ -1030,13 +1031,14 @@ struct LauncherView: View {
         VStack(spacing: 0) {
             ZStack {
                 HStack(spacing: 20) {
-                    tab("Repositories", selected: !notifications && !settings) { notifications = false; settings = false }
+                    tab("Repositories", selected: !notifications && !settings && !showingAgenda) { notifications = false; settings = false; showingAgenda = false }
+                    tab("Agenda", selected: showingAgenda && !settings) { showingAgenda = true; notifications = false; settings = false }
                     Spacer()
                     if library.refreshing || inbox.loading { ProgressView().controlSize(.small) }
                     if notifications && !settings {
                         Button("Connect GitHub", action: inbox.connect).buttonStyle(.plain).font(.system(size: 12))
                     }
-                    tab("Notifications", selected: notifications && !settings) { notifications = true; settings = false }
+                    tab("Notifications", selected: notifications && !settings) { notifications = true; settings = false; showingAgenda = false }
                     Button { settings = true } label: {
                         Image(systemName: "gearshape")
                             .font(.system(size: 14, weight: settings ? .semibold : .regular))
@@ -1069,6 +1071,8 @@ struct LauncherView: View {
             .padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 12)
             if settings {
                 settingsPage
+            } else if showingAgenda {
+                AgendaView()
             } else {
             if notifications, let message = inbox.message {
                 Text(message).font(.system(size: 12)).foregroundStyle(Palette.muted).padding(.horizontal, 24).padding(.bottom, 8)

@@ -3,7 +3,7 @@ set -eu
 source_dir=${0:A:h}
 destination=${1:-"$source_dir/Repository Launcher.app"}
 mkdir -p "$destination/Contents/MacOS" "$destination/Contents/Resources"
-xcrun swiftc -O -parse-as-library "$source_dir/RepoLauncher.swift" "$source_dir/Notifications.swift" -o "$destination/Contents/MacOS/RepositoryLauncher" -framework SwiftUI -framework AppKit
+xcrun swiftc -O -parse-as-library "$source_dir/RepoLauncher.swift" "$source_dir/Notifications.swift" "$source_dir/Agenda.swift" -o "$destination/Contents/MacOS/RepositoryLauncher" -framework SwiftUI -framework AppKit
 icon_dir=$(mktemp -d /tmp/mobli-icon.XXXXXX)
 trap 'rm -rf "$icon_dir"' EXIT
 mkdir "$icon_dir/AppIcon.iconset"
