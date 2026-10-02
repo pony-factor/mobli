@@ -853,7 +853,7 @@ struct FolderSearchBar: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12))
                 .foregroundStyle(Palette.muted)
-            TextField("Search folders on this Mac", text: $query)
+            TextField("Folders", text: $query)
                 .textFieldStyle(.plain)
                 .focused($focused)
                 .onSubmit {
