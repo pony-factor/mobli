@@ -1007,9 +1007,11 @@ struct NotificationRow: View {
 struct LauncherView: View {
     @StateObject private var library = Library()
     @StateObject private var inbox = Inbox()
+    @StateObject private var activityFeed = ActivityFeed()
     @StateObject private var ownerOrder = OwnerOrderPreferences()
     @StateObject private var repoUsage = RepositoryUsageStore()
     @State private var notifications = false
+    @State private var activity = false
     @State private var settings = false
     @State private var dropTarget: String?
     @AppStorage("studio.repository-launcher.show-repository-counts") private var showRepositoryCounts = true
@@ -1030,13 +1032,17 @@ struct LauncherView: View {
         VStack(spacing: 0) {
             ZStack {
                 HStack(spacing: 20) {
-                    tab("Repositories", selected: !notifications && !settings) { notifications = false; settings = false }
+                    tab("Repositories", selected: !notifications && !activity && !settings) { notifications = false; activity = false; settings = false }
                     Spacer()
-                    if library.refreshing || inbox.loading { ProgressView().controlSize(.small) }
+                    if library.refreshing || inbox.loading || activityFeed.loading { ProgressView().controlSize(.small) }
+                    if activity && !settings && activityFeed.needsConnection {
+                        Button("Connect GitHub", action: activityFeed.connect).buttonStyle(.plain).font(.system(size: 12))
+                    }
                     if notifications && !settings {
                         Button("Connect GitHub", action: inbox.connect).buttonStyle(.plain).font(.system(size: 12))
                     }
-                    tab("Notifications", selected: notifications && !settings) { notifications = true; settings = false }
+                    tab("Activity", selected: activity && !settings) { notifications = false; activity = true; settings = false }
+                    tab("Notifications", selected: notifications && !settings) { notifications = true; activity = false; settings = false }
                     Button { settings = true } label: {
                         Image(systemName: "gearshape")
                             .font(.system(size: 14, weight: settings ? .semibold : .regular))
@@ -1070,16 +1076,32 @@ struct LauncherView: View {
             if settings {
                 settingsPage
             } else {
-            if notifications, let message = inbox.message {
+            if activity, let message = activityFeed.message {
+                Text(message).font(.system(size: 12)).foregroundStyle(Palette.muted).padding(.horizontal, 24).padding(.bottom, 8)
+            } else if notifications, let message = inbox.message {
                 Text(message).font(.system(size: 12)).foregroundStyle(Palette.muted).padding(.horizontal, 24).padding(.bottom, 8)
             }
             GeometryReader { geometry in
-                let width: CGFloat = notifications ? 320 : 260
+                let width: CGFloat = activity ? 360 : (notifications ? 320 : 260)
                 ScrollView(.horizontal) {
                     HStack(alignment: .top, spacing: 14) {
                         ForEach(owners, id: \.self) { owner in
                             VStack(alignment: .leading, spacing: 0) {
-                                if notifications {
+                                if activity {
+                                    let items = activityFeed.items(for: owner)
+                                    OwnerHeader(owner: owner, profile: library.profiles[owner], subtitle: "\(items.count) recent", showOwnerSlugs: showOwnerSlugs)
+                                        .draggable(owner).help("Drag to reorder organizations")
+                                    ScrollView(.vertical) {
+                                        LazyVStack(alignment: .leading, spacing: 0) {
+                                            if items.isEmpty {
+                                                Text(activityFeed.loading ? "Loading activity…" : "No recent pull-request activity")
+                                                    .font(.system(size: 12)).foregroundStyle(Palette.muted).padding(12)
+                                            } else {
+                                                ForEach(items) { item in ActivityRow(item: item) }
+                                            }
+                                        }.padding(.vertical, 4)
+                                    }
+                                } else if notifications {
                                     let threads = inbox.threads.filter { $0.owner == owner }
                                     OwnerHeader(owner: owner, profile: inbox.profiles[owner], subtitle: "\(threads.count) unread", showOwnerSlugs: showOwnerSlugs)
                                         .draggable(owner).help("Drag to reorder organizations")
@@ -1136,7 +1158,7 @@ struct LauncherView: View {
                                 else if dropTarget == owner { dropTarget = nil }
                             }
                         }
-                        if !notifications {
+                        if !notifications && !activity {
                             AddOrganizationCard {
                                 newOrganization = ""
                                 addOrganizationError = nil
@@ -1147,12 +1169,15 @@ struct LauncherView: View {
                     }.padding(24)
                 }
                 .overlay {
-                    if notifications && owners.isEmpty {
+                    if (activity || notifications) && owners.isEmpty {
                         VStack(spacing: 12) {
-                            if notifications {
+                            if activity {
+                                Text(activityFeed.loading ? "Loading activity…" : activityFeed.needsConnection ? "Connect GitHub to see organization activity" : activityFeed.message != nil ? "Organization activity is unavailable" : "No organization activity found")
+                                if activityFeed.needsConnection { Button("Connect GitHub", action: activityFeed.connect).buttonStyle(.plain) }
+                            } else {
                                 Text(inbox.loading ? "Loading notifications…" : inbox.needsConnection ? "Connect GitHub to see your inbox" : inbox.message != nil ? "Your inbox is unavailable" : "You’re all caught up")
                                 if inbox.needsConnection { Button("Connect GitHub", action: inbox.connect).buttonStyle(.plain) }
-                            } else { Text("No repositories found in ~/GitHub") }
+                            }
                         }.foregroundStyle(Palette.muted)
                     }
                 }
@@ -1196,13 +1221,22 @@ struct LauncherView: View {
         }
         .task(id: settings) {
             guard settings else { return }
-            async let repositories: Void = library.refresh(forceProfiles: true, priorityOwners: ownerOrder.manualOwners)
             async let notifications: Void = inbox.refresh()
-            _ = await (repositories, notifications)
+            await library.refresh(forceProfiles: true, priorityOwners: ownerOrder.manualOwners)
+            async let activity: Void = activityFeed.refresh(owners: ownerOrder.ordered(library.owners + ownerOrder.manualOwners), force: true)
+            _ = await (notifications, activity)
             for owner in ownerOrder.manualOwners where !library.owners.contains(owner) {
                 if let profile = await OwnerCache.shared.profile(owner, force: true) {
                     library.profiles[owner] = profile
                 }
+            }
+        }
+        .task(id: activity) {
+            guard activity else { return }
+            await library.refresh(priorityOwners: ownerOrder.manualOwners)
+            while !Task.isCancelled {
+                await activityFeed.refresh(owners: owners)
+                try? await Task.sleep(for: .seconds(60))
             }
         }
         .task(id: notifications) {
@@ -1214,7 +1248,16 @@ struct LauncherView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
-                Task { if notifications { await inbox.refresh() } else { await library.refresh(priorityOwners: ownerOrder.manualOwners) } }
+                Task {
+                    if activity {
+                        await library.refresh(priorityOwners: ownerOrder.manualOwners)
+                        await activityFeed.refresh(owners: owners, force: true)
+                    } else if notifications {
+                        await inbox.refresh()
+                    } else {
+                        await library.refresh(priorityOwners: ownerOrder.manualOwners)
+                    }
+                }
             }
         }
         .sheet(isPresented: $addingOrganization) {
@@ -1247,9 +1290,9 @@ struct LauncherView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 Text("Settings").font(.system(size: 22, weight: .semibold))
-                Text(library.refreshing || inbox.loading
-                     ? "Refreshing local and GitHub repositories, owner profiles, and notifications…"
-                     : "Opening Settings refreshes local and GitHub repositories, owner profiles, and notifications.")
+                Text(library.refreshing || inbox.loading || activityFeed.loading
+                     ? "Refreshing local and GitHub repositories, owner profiles, notifications, and activity…"
+                     : "Opening Settings refreshes local and GitHub repositories, owner profiles, notifications, and activity.")
                     .font(.system(size: 12)).foregroundStyle(Palette.muted)
                 if let githubMessage = library.githubMessage {
                     Text(githubMessage).font(.system(size: 12)).foregroundStyle(Palette.muted)
@@ -1258,7 +1301,7 @@ struct LauncherView: View {
                 Toggle("Show GitHub owner slugs beneath display names", isOn: $showOwnerSlugs)
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Organization order").font(.system(size: 15, weight: .semibold))
-                    Text("Drag organization headers on the Repositories or Notifications page, or use the arrows below.")
+                    Text("Drag organization headers on the Repositories, Activity, or Notifications page, or use the arrows below.")
                         .font(.system(size: 12)).foregroundStyle(Palette.muted)
                     let orderedOwners = ownerOrder.ordered(library.owners + ownerOrder.manualOwners + inbox.owners)
                     ForEach(Array(orderedOwners.enumerated()), id: \.element) { index, owner in
