@@ -674,6 +674,7 @@ enum OwnerOrdering {
 }
 
 enum Palette {
+    static let accent = Color(red: 67.0 / 255, green: 175.0 / 255, blue: 73.0 / 255)
     static let background = Color(red: 0.065, green: 0.075, blue: 0.095)
     static let column = Color(red: 0.09, green: 0.105, blue: 0.13)
     static let text = Color(red: 0.87, green: 0.90, blue: 0.94)
@@ -843,7 +844,7 @@ struct FolderSearchBar: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12))
-                .foregroundStyle(focused ? Palette.text : Palette.muted)
+                .foregroundStyle(focused ? Palette.accent : Palette.muted)
             TextField("Folders", text: $query)
                 .textFieldStyle(.plain)
                 .focused($focused)
@@ -868,13 +869,13 @@ struct FolderSearchBar: View {
         }
         .padding(.horizontal, 11)
         .frame(height: 32)
-        .background(focused ? Color(red: 0.13, green: 0.15, blue: 0.19) : Palette.column)
+        .background(Palette.column.overlay(focused ? Palette.accent.opacity(0.10) : Color.clear))
         .clipShape(RoundedRectangle(cornerRadius: 7))
         .contentShape(Rectangle())
         .onTapGesture { focused = true }
         .overlay {
             RoundedRectangle(cornerRadius: 7)
-                .stroke(focused ? Color.accentColor : Color.white.opacity(0.08),
+                .stroke(focused ? Palette.accent : Color.white.opacity(0.08),
                         lineWidth: focused ? 2 : 1)
         }
         .overlay(alignment: .top) {
@@ -1154,6 +1155,7 @@ struct LauncherView: View {
             }
         }
         .background(Palette.background).foregroundStyle(Palette.text).preferredColorScheme(.dark)
+        .tint(Palette.accent)
         .frame(minWidth: 650, minHeight: 400)
         .task { await library.refresh(priorityOwners: ownerOrder.manualOwners) }
         .task(id: folderQuery) {
