@@ -188,32 +188,23 @@ struct RepositoryUsage: Codable, Equatable {
 }
 
 enum RepositoryRanking {
-    private static let day: TimeInterval = 24 * 60 * 60
-
-    private static func daysSince(_ date: Date?, now: Date) -> Double {
-        guard let date else { return 3650 }
-        return max(0, now.timeIntervalSince(date) / day)
-    }
-
-    static func score(_ repository: Repository, usage: [String: RepositoryUsage],
-                      now: Date = Date()) -> Double {
-        let repositoryUsage = usage[repository.usageKey] ?? RepositoryUsage(opens: 0, lastOpened: nil)
-        let freshness = exp(-daysSince(repository.lastActivityAt, now: now) / 120)
-        let frequency = min(1, log2(Double(max(0, repositoryUsage.opens) + 1)) / 4)
-        let recentlyOpened = repositoryUsage.lastOpened
-            .map { exp(-daysSince($0, now: now) / 30) } ?? 0
-        return (freshness * 0.6) + (frequency * 0.27) + (recentlyOpened * 0.13)
-    }
-
     static func ranked(_ repositories: [Repository], usage: [String: RepositoryUsage],
-                       now: Date = Date(), pinned: Set<String> = []) -> [Repository] {
+                       pinned: Set<String> = []) -> [Repository] {
         repositories.sorted { first, second in
             let firstPinned = pinned.contains(first.usageKey)
             let secondPinned = pinned.contains(second.usageKey)
             if firstPinned != secondPinned { return firstPinned }
-            let scoreDifference = score(first, usage: usage, now: now)
-                - score(second, usage: usage, now: now)
-            if abs(scoreDifference) > 0.0001 { return scoreDifference > 0 }
+            if first.isLocal != second.isLocal { return first.isLocal }
+
+            let firstUsage = usage[first.usageKey]
+            let secondUsage = usage[second.usageKey]
+            let firstOpened = firstUsage?.lastOpened ?? .distantPast
+            let secondOpened = secondUsage?.lastOpened ?? .distantPast
+            if firstOpened != secondOpened { return firstOpened > secondOpened }
+
+            let firstOpens = firstUsage?.opens ?? 0
+            let secondOpens = secondUsage?.opens ?? 0
+            if firstOpens != secondOpens { return firstOpens > secondOpens }
 
             let firstActivity = first.lastActivityAt ?? .distantPast
             let secondActivity = second.lastActivityAt ?? .distantPast
@@ -1056,6 +1047,11 @@ struct LauncherView: View {
                                 searching: folderSearching, message: folderSearchMessage) { result in
                     folderResults = []
                     folderSearchMessage = nil
+                    if let repo = library.repos.first(where: {
+                        $0.isLocal && $0.url.standardizedFileURL.path == result.url.standardizedFileURL.path
+                    }) {
+                        repoUsage.record(repo)
+                    }
                     library.openFolder(result.url)
                 }
                 .frame(width: 440)

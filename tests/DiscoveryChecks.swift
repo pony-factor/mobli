@@ -17,22 +17,30 @@ import Foundation
         let crossOrgUsage = [
             "org-b/shared": RepositoryUsage(opens: 16, lastOpened: rankingNow)
         ]
-        precondition(RepositoryRanking.ranked([orgA, orgB], usage: crossOrgUsage,
-                                              now: rankingNow).first?.owner == "org-b")
+        precondition(RepositoryRanking.ranked([orgA, orgB], usage: crossOrgUsage).first?.owner == "org-b")
 
         let fresh = Repository(url: URL(fileURLWithPath: "/tmp/org-a/fresh"), owner: "org-a",
                                lastActivityAt: rankingNow.addingTimeInterval(-86_400))
         let stale = Repository(url: URL(fileURLWithPath: "/tmp/org-a/stale"), owner: "org-a",
                                lastActivityAt: rankingNow.addingTimeInterval(-365 * 86_400.0))
-        precondition(RepositoryRanking.ranked([stale, fresh], usage: [:],
-                                              now: rankingNow).first?.name == "fresh")
+        precondition(RepositoryRanking.ranked([stale, fresh], usage: [:]).first?.name == "fresh")
 
-        precondition(RepositoryRanking.ranked([fresh, stale], usage: [:], now: rankingNow,
+        precondition(RepositoryRanking.ranked([fresh, stale], usage: [:],
                                               pinned: [stale.usageKey]).first?.name == "stale")
-        precondition(RepositoryRanking.ranked([orgA, orgB], usage: crossOrgUsage, now: rankingNow,
+        precondition(RepositoryRanking.ranked([orgA, orgB], usage: crossOrgUsage,
                                               pinned: [orgA.usageKey]).first?.owner == "org-a")
-        precondition(RepositoryRanking.ranked([stale, fresh], usage: [:], now: rankingNow,
+        precondition(RepositoryRanking.ranked([stale, fresh], usage: [:],
                                               pinned: [stale.usageKey, fresh.usageKey]).first?.name == "fresh")
+
+        // Opening an older project now must outrank both a new commit and frequent past use.
+        let recentUsage = [
+            stale.usageKey: RepositoryUsage(opens: 1, lastOpened: rankingNow),
+            fresh.usageKey: RepositoryUsage(opens: 500, lastOpened: rankingNow.addingTimeInterval(-86_400))
+        ]
+        precondition(RepositoryRanking.ranked([fresh, stale], usage: recentUsage).first?.name == "stale")
+        precondition(RepositoryRanking.ranked([fresh, stale], usage: [
+            stale.usageKey: RepositoryUsage(opens: 1, lastOpened: rankingNow.addingTimeInterval(-90 * 86_400))
+        ]).first?.name == "stale")
 
         let remoteDuplicate = Repository(
             url: URL(fileURLWithPath: "/tmp/GitHub/org-a/shared"),
@@ -46,6 +54,13 @@ import Foundation
             lastActivityAt: rankingNow,
             cloneURL: URL(string: "https://github.com/org-a/remote-only.git")
         )
+        // A cloud row stays below cloned projects, even if it has newer activity or saved usage.
+        precondition(RepositoryRanking.ranked([remoteOnly, stale], usage: [
+            remoteOnly.usageKey: RepositoryUsage(opens: 20, lastOpened: rankingNow)
+        ]).first?.isLocal == true)
+        precondition(RepositoryRanking.ranked([stale, remoteOnly], usage: [:],
+                                              pinned: [remoteOnly.usageKey]).first?.name == "remote-only")
+        precondition(RepositoryRanking.ranked([orgB, orgA], usage: [:]).first?.owner == "org-a")
         let merged = Discovery.merged(local: [orgA], remote: [remoteDuplicate, remoteOnly])
         precondition(merged.count == 2)
         precondition(merged.first(where: { $0.usageKey == orgA.usageKey })?.isLocal == true)
