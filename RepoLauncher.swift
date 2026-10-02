@@ -1197,11 +1197,7 @@ struct LauncherView: View {
             }
             if !notifications && !activity && !pinnedRepositories.isEmpty {
                 VStack(spacing: 0) {
-                    HStack(spacing: 12) {
-                        Text("Pinned")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Palette.muted)
-                            .frame(width: 48, alignment: .leading)
+                    GeometryReader { geometry in
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 8) {
                                 ForEach(pinnedRepositories) { repo in
@@ -1233,6 +1229,7 @@ struct LauncherView: View {
                                 }
                             }
                             .padding(.vertical, 8)
+                            .frame(minWidth: geometry.size.width, alignment: .center)
                         }
                     }
                     .padding(.horizontal, 24)
@@ -1311,6 +1308,15 @@ struct LauncherView: View {
                                     .stroke(dropTarget == owner ? Palette.text : .clear, lineWidth: 2)
                             }
                             .dropDestination(for: String.self) { items, location in
+                                if !notifications && !activity {
+                                    let returningRepositories = library.repositories(for: owner).filter {
+                                        $0.isLocal && repoUsage.isPinned($0) && items.contains($0.usageKey)
+                                    }
+                                    if !returningRepositories.isEmpty {
+                                        for repository in returningRepositories { repoUsage.togglePin(repository) }
+                                        return true
+                                    }
+                                }
                                 guard let source = items.first, source != owner, owners.contains(source) else { return false }
                                 ownerOrder.move(source, relativeTo: owner, after: location.x > width / 2,
                                                 among: availableOwners)
@@ -1483,7 +1489,7 @@ struct LauncherView: View {
                         }
                     }
                 }
-                Text("Pinned local repositories move into the draggable bar above the organization columns. A cloud marks a GitHub repository that is not local yet; use its download button to clone it into ~/GitHub. Pin order and organization order are saved automatically.")
+                Text("Pinned local repositories move into the centered bar above the organization columns. Drag a pinned repository back to its organization column to unpin it. A cloud marks a GitHub repository that is not local yet; use its download button to clone it into ~/GitHub. Pin order and organization order are saved automatically.")
                     .font(.system(size: 12)).foregroundStyle(Palette.muted)
             }
             .padding(24).frame(maxWidth: 650, alignment: .leading)
