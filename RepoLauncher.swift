@@ -1162,6 +1162,12 @@ struct LauncherView: View {
         .background(Palette.background).foregroundStyle(Palette.text).preferredColorScheme(.dark)
         .tint(Palette.accent)
         .frame(minWidth: 650, minHeight: 400)
+        .onDisappear {
+            folderQuery = ""
+            folderResults = []
+            folderSearching = false
+            folderSearchMessage = nil
+        }
         .task { await library.refresh(priorityOwners: ownerOrder.manualOwners) }
         .task(id: folderQuery) {
             let query = folderQuery.trimmingCharacters(in: .whitespacesAndNewlines)
