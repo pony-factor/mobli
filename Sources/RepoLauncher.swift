@@ -506,6 +506,8 @@ enum OwnerOrdering {
 @MainActor final class RepositoryUsageStore: ObservableObject {
     @Published private var usage: [String: RepositoryUsage]
     @Published private(set) var pinnedOrder: [String]
+    @Published private(set) var columnPins: Set<String>
+    private static let columnPinKey = "studio.repository-launcher.column-pins"
     private static let pinKey = "studio.repository-launcher.pinned-repositories"
     private let defaults: UserDefaults
     private static let key = "studio.repository-launcher.repository-usage"
@@ -517,6 +519,7 @@ enum OwnerOrdering {
         let savedPins = defaults.stringArray(forKey: Self.pinKey) ?? []
         var seenPins = Set<String>()
         pinnedOrder = savedPins.filter { seenPins.insert($0).inserted }
+        columnPins = Set(defaults.stringArray(forKey: Self.columnPinKey) ?? []).intersection(seenPins)
         if let data = defaults.data(forKey: Self.key),
            let saved = try? JSONDecoder().decode([String: RepositoryUsage].self, from: data) {
             usage = saved
@@ -526,22 +529,36 @@ enum OwnerOrdering {
     }
 
     func ranked(_ repositories: [Repository]) -> [Repository] {
-        RepositoryRanking.ranked(repositories, usage: usage, pinned: pinned)
+        let localPins = repositories.filter { $0.isLocal && columnPins.contains($0.usageKey) }
+        let otherRepositories = repositories.filter { !($0.isLocal && columnPins.contains($0.usageKey)) }
+        return PinnedRepositoryOrdering.ordered(localPins, keys: pinnedOrder)
+            + RepositoryRanking.ranked(otherRepositories, usage: usage, pinned: pinned)
     }
+
+    func isColumnPinned(_ repository: Repository) -> Bool { columnPins.contains(repository.usageKey) }
 
     func isPinned(_ repository: Repository) -> Bool { pinned.contains(repository.usageKey) }
 
     func pinnedRepositories(from repositories: [Repository]) -> [Repository] {
-        PinnedRepositoryOrdering.ordered(repositories.filter(\.isLocal), keys: pinnedOrder)
+        PinnedRepositoryOrdering.ordered(repositories.filter { $0.isLocal && !columnPins.contains($0.usageKey) }, keys: pinnedOrder)
     }
 
     func togglePin(_ repository: Repository) {
         if let index = pinnedOrder.firstIndex(of: repository.usageKey) {
             pinnedOrder.remove(at: index)
+            columnPins.remove(repository.usageKey)
         } else {
             pinnedOrder.append(repository.usageKey)
+            columnPins.remove(repository.usageKey)
         }
         defaults.set(pinnedOrder, forKey: Self.pinKey)
+        defaults.set(columnPins.sorted(), forKey: Self.columnPinKey)
+    }
+
+    func placeInColumn(_ repository: Repository) {
+        guard repository.isLocal, isPinned(repository) else { return }
+        columnPins.insert(repository.usageKey)
+        defaults.set(columnPins.sorted(), forKey: Self.columnPinKey)
     }
 
     func movePinned(_ source: String, relativeTo target: String, after: Bool) {
@@ -741,9 +758,14 @@ struct RepositoryRow: View {
     let togglePin: () -> Void
     let open: () -> Void
     let clone: () -> Void
+    var dragKey: String? = nil
     @State private var hovered = false
 
     var body: some View {
+        if let dragKey { row.draggable(dragKey) } else { row }
+    }
+
+    private var row: some View {
         HStack(spacing: 0) {
             if repo.isLocal {
                 Button(action: open) {
@@ -1274,7 +1296,7 @@ struct LauncherView: View {
                                     }
                                     .dropDestination(for: String.self) { items, location in
                                         guard let source = items.first,
-                                              repoUsage.pinned.contains(source),
+                                              pinnedRepositories.contains(where: { $0.usageKey == source }),
                                               source != repo.usageKey else { return false }
                                         repoUsage.movePinned(source, relativeTo: repo.usageKey,
                                                              after: location.x > 105)
@@ -1326,7 +1348,7 @@ struct LauncherView: View {
                                 } else {
                                     let ownerRepositories = library.repositories(for: owner)
                                     let repositories = repoUsage.ranked(ownerRepositories.filter {
-                                        !repoUsage.isPinned($0) || !$0.isLocal
+                                        !repoUsage.isPinned($0) || repoUsage.isColumnPinned($0) || !$0.isLocal
                                     })
                                     OwnerHeader(owner: owner, profile: library.profiles[owner], subtitle: showRepositoryCounts ? "\(ownerRepositories.count) repos" : nil, showOwnerSlugs: showOwnerSlugs)
                                         .draggable(owner).help("Drag to reorder organizations")
@@ -1349,8 +1371,13 @@ struct LauncherView: View {
                                                         repoUsage.record(repo)
                                                         library.open(repo)
                                                     },
-                                                    clone: { Task { await library.clone(repo) } }
+                                                    clone: { Task { await library.clone(repo) } },
+                                                    dragKey: repoUsage.isColumnPinned(repo) ? repo.usageKey : nil
                                                 )
+                                                .dropDestination(for: String.self) { items, location in
+                                                    receiveColumnPin(items, owner: owner, target: repo,
+                                                                     after: location.y > 20)
+                                                }
                                             }
                                         }
                                         .padding(.vertical, 4)
@@ -1366,13 +1393,7 @@ struct LauncherView: View {
                             }
                             .dropDestination(for: String.self) { items, location in
                                 if !notifications && !activity {
-                                    let returningRepositories = library.repositories(for: owner).filter {
-                                        $0.isLocal && repoUsage.isPinned($0) && items.contains($0.usageKey)
-                                    }
-                                    if !returningRepositories.isEmpty {
-                                        for repository in returningRepositories { repoUsage.togglePin(repository) }
-                                        return true
-                                    }
+                                    if receiveColumnPin(items, owner: owner) { return true }
                                 }
                                 guard let source = items.first, source != owner, owners.contains(source) else { return false }
                                 ownerOrder.move(source, relativeTo: owner, after: location.x > width / 2,
@@ -1540,7 +1561,7 @@ struct LauncherView: View {
                         }
                     }
                 }
-                Text("Pinned local repositories move into the centered bar above the organization columns. Drag a pinned repository back to its organization column to unpin it. A cloud marks a GitHub repository that is not local yet; use its download button to clone it into ~/GitHub. Pin order and organization order are saved automatically.")
+                Text("Pinned local repositories move into the centered bar above the organization columns. Drag a top pin into its organization column to keep it pinned there, then drag column pins to reorder them. A cloud marks a GitHub repository that is not local yet; use its download button to clone it into ~/GitHub. Pin order and organization order are saved automatically.")
                     .font(.system(size: 12)).foregroundStyle(Palette.muted)
             }
             .padding(24).frame(maxWidth: 650, alignment: .leading)
@@ -1562,6 +1583,19 @@ struct LauncherView: View {
             }
             await library.refresh(priorityOwners: ownerOrder.manualOwners)
         }
+    }
+
+    private func receiveColumnPin(_ items: [String], owner: String,
+                                  target: Repository? = nil, after: Bool = false) -> Bool {
+        guard let source = items.first,
+              let repository = library.repositories(for: owner).first(where: {
+                  $0.isLocal && $0.usageKey == source && repoUsage.isPinned($0)
+              }), target?.usageKey != source else { return false }
+        repoUsage.placeInColumn(repository)
+        if let target, repoUsage.isColumnPinned(target) {
+            repoUsage.movePinned(source, relativeTo: target.usageKey, after: after)
+        }
+        return true
     }
 
     private func tab(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
