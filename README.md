@@ -35,6 +35,8 @@ The tab defaults to your connected account and selects a project whose title con
 
 If your GitHub CLI connection lacks project access, click **Connect GitHub Projects**, finish authorization in your browser, and refresh. This requests the `read:project` scope through GitHub CLI without reading or storing credentials in the launcher.
 
+To edit items, click **Enable editing** and authorize the `project` scope for read and write access. Change an item’s column with **Move to** or drag it into another status column; **No status** clears its assignment. Click **Comment** on an issue or pull request to write and post a comment. Failed status updates leave the item in its original column, and failed comments keep your draft. Draft project tasks can move between columns but have no issue discussion to comment on.
+
 ## Notifications
 
 The Notifications tab shows unread GitHub threads in owner columns, including repositories that are not cloned locally. Click a title to open its discussion on GitHub, or click its checkmark to mark the thread as read. The inbox loads all pages and refreshes while the tab is open, respecting GitHub’s polling interval and conditional responses. Notifications stay in memory; only public owner names and logos use the seven-day disk cache.
