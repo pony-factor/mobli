@@ -3,12 +3,8 @@ set -eu
 source_dir=${0:A:h}
 destination=${1:-"$source_dir/Repository Launcher.app"}
 mkdir -p "$destination/Contents/MacOS" "$destination/Contents/Resources"
-xcrun swiftc -O -parse-as-library "$source_dir/RepoLauncher.swift" "$source_dir/Notifications.swift" -o "$destination/Contents/MacOS/RepositoryLauncher" -framework SwiftUI -framework AppKit
-icon_dir=$(mktemp -d /tmp/mobli-icon.XXXXXX)
-trap 'rm -rf "$icon_dir"' EXIT
-mkdir "$icon_dir/AppIcon.iconset"
-xcrun swift "$source_dir/AppIcon.swift" "$icon_dir/AppIcon.iconset"
-iconutil -c icns "$icon_dir/AppIcon.iconset" -o "$destination/Contents/Resources/AppIcon.icns"
+xcrun swiftc -O -parse-as-library "$source_dir/RepoLauncher.swift" "$source_dir/Notifications.swift" "$source_dir/Agenda.swift" -o "$destination/Contents/MacOS/RepositoryLauncher" -framework SwiftUI -framework AppKit
+ditto "$source_dir/AppIcon.icns" "$destination/Contents/Resources/AppIcon.icns"
 cat > "$destination/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

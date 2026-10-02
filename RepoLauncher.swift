@@ -132,6 +132,7 @@ struct FolderSearchResult: Identifiable, Sendable {
     var id: String { url.path }
     var name: String { url.lastPathComponent }
     var parentPath: String { url.deletingLastPathComponent().path }
+    var isRepository: Bool { FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path) }
 }
 
 enum FolderSearchFailure: LocalizedError {
@@ -143,9 +144,9 @@ enum FolderSearchFailure: LocalizedError {
 }
 
 enum FolderSearch {
-    static func search(_ rawQuery: String, limit: Int = 16) async throws -> [FolderSearchResult] {
+    static func search(_ rawQuery: String, repositories: [Repository] = [], limit: Int = 16) async throws -> [FolderSearchResult] {
         let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return [] }
+        guard !query.isEmpty, limit > 0 else { return [] }
 
         let escaped = query
             .replacingOccurrences(of: "\\", with: "\\\\")
@@ -163,11 +164,18 @@ enum FolderSearch {
             try process.run()
             let data = output.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
-            guard process.terminationStatus == 0 else { throw FolderSearchFailure.unavailable }
+            let matchingRepositories = repositories.filter {
+                $0.isLocal && $0.fullName.localizedStandardContains(query)
+                    && FileManager.default.fileExists(atPath: $0.url.path)
+            }.map { FolderSearchResult(url: $0.url) }
+            guard process.terminationStatus == 0 else {
+                if !matchingRepositories.isEmpty { return Array(matchingRepositories.prefix(limit)) }
+                throw FolderSearchFailure.unavailable
+            }
 
             let text = String(decoding: data, as: UTF8.self)
-            var seen = Set<String>()
-            var results: [FolderSearchResult] = []
+            var seen = Set(matchingRepositories.map(\.id))
+            var results = matchingRepositories
             for line in text.split(whereSeparator: \.isNewline) {
                 let path = String(line)
                 guard seen.insert(path).inserted else { continue }
@@ -175,9 +183,16 @@ enum FolderSearch {
                 guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
                       isDirectory.boolValue else { continue }
                 results.append(FolderSearchResult(url: URL(fileURLWithPath: path, isDirectory: true)))
-                if results.count >= limit { break }
             }
-            return results
+            return Array(results.sorted { first, second in
+                if first.isRepository != second.isRepository { return first.isRepository }
+                let firstExact = first.name.compare(query, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+                let secondExact = second.name.compare(query, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+                if firstExact != secondExact { return firstExact }
+                let comparison = first.name.localizedStandardCompare(second.name)
+                if comparison != .orderedSame { return comparison == .orderedAscending }
+                return first.id < second.id
+            }.prefix(limit))
         }.value
     }
 }
@@ -936,7 +951,7 @@ struct FolderSearchBar: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12))
                 .foregroundStyle(focused ? Palette.accent : Palette.muted)
-            TextField("Folders", text: $query)
+            TextField("Repositories and folders", text: $query)
                 .textFieldStyle(.plain)
                 .focused($focused)
                 .onSubmit {
@@ -986,7 +1001,7 @@ struct FolderSearchBar: View {
                                         select(result)
                                     } label: {
                                         HStack(spacing: 10) {
-                                            Image(systemName: "folder")
+                                            Image(systemName: result.isRepository ? "chevron.left.forwardslash.chevron.right" : "folder")
                                                 .font(.system(size: 13))
                                                 .foregroundStyle(Palette.muted)
                                             VStack(alignment: .leading, spacing: 2) {
@@ -1101,6 +1116,7 @@ struct LauncherView: View {
     @StateObject private var ownerOrder = OwnerOrderPreferences()
     @StateObject private var repoUsage = RepositoryUsageStore()
     @State private var notifications = false
+    @State private var showingAgenda = false
     @State private var settings = false
     @State private var dropTarget: String?
     @State private var pinnedDropTarget: String?
@@ -1125,13 +1141,14 @@ struct LauncherView: View {
         VStack(spacing: 0) {
             ZStack {
                 HStack(spacing: 20) {
-                    tab("Repositories", selected: !notifications && !settings) { notifications = false; settings = false }
+                    tab("Repositories", selected: !notifications && !settings && !showingAgenda) { notifications = false; settings = false; showingAgenda = false }
+                    tab("Agenda", selected: showingAgenda && !settings) { showingAgenda = true; notifications = false; settings = false }
                     Spacer()
                     if library.refreshing || inbox.loading { ProgressView().controlSize(.small) }
                     if notifications && !settings {
                         Button("Connect GitHub", action: inbox.connect).buttonStyle(.plain).font(.system(size: 12))
                     }
-                    tab("Notifications", selected: notifications && !settings) { notifications = true; settings = false }
+                    tab("Notifications", selected: notifications && !settings) { notifications = true; settings = false; showingAgenda = false }
                     Button { settings = true } label: {
                         Image(systemName: "gearshape")
                             .font(.system(size: 14, weight: settings ? .semibold : .regular))
@@ -1164,6 +1181,8 @@ struct LauncherView: View {
             .padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 12)
             if settings {
                 settingsPage
+            } else if showingAgenda {
+                AgendaView()
             } else {
             if notifications, let message = inbox.message {
                 Text(message).font(.system(size: 12)).foregroundStyle(Palette.muted).padding(.horizontal, 24).padding(.bottom, 8)
@@ -1325,7 +1344,7 @@ struct LauncherView: View {
             do {
                 try await Task.sleep(for: .milliseconds(180))
                 guard !Task.isCancelled else { return }
-                let results = try await FolderSearch.search(query)
+                let results = try await FolderSearch.search(query, repositories: library.repos)
                 guard !Task.isCancelled else { return }
                 folderResults = results
             } catch is CancellationError {
