@@ -1204,6 +1204,8 @@ struct LauncherView: View {
     @State private var settings = false
     @State private var dropTarget: String?
     @State private var pinnedDropTarget: String?
+    @State private var draggedPinnedOwner: String?
+    @State private var pinnedDragMouseUpMonitor: Any?
     @AppStorage("studio.repository-launcher.show-repository-counts") private var showRepositoryCounts = true
     @AppStorage("studio.repository-launcher.show-owner-slugs") private var showOwnerSlugs = true
     @State private var addingOrganization = false
@@ -1295,7 +1297,7 @@ struct LauncherView: View {
                                         },
                                         togglePin: { repoUsage.togglePin(repo) }
                                     )
-                                    .draggable(repo.usageKey)
+                                    .onDrag { beginPinnedDrag(repo) }
                                     .overlay {
                                         RoundedRectangle(cornerRadius: 7)
                                             .stroke(pinnedDropTarget == repo.usageKey ? Palette.text : .clear, lineWidth: 2)
@@ -1306,6 +1308,7 @@ struct LauncherView: View {
                                               source != repo.usageKey else { return false }
                                         repoUsage.movePinned(source, relativeTo: repo.usageKey,
                                                              after: location.x > PinnedRepositoryItem.width / 2)
+                                        endPinnedDrag()
                                         return true
                                     } isTargeted: { targeted in
                                         if targeted { pinnedDropTarget = repo.usageKey }
@@ -1381,8 +1384,10 @@ struct LauncherView: View {
                                                     dragKey: repoUsage.isColumnPinned(repo) ? repo.usageKey : nil
                                                 )
                                                 .dropDestination(for: String.self) { items, location in
-                                                    receiveColumnPin(items, owner: owner, target: repo,
-                                                                     after: location.y > 20)
+                                                    let accepted = receiveColumnPin(items, owner: owner, target: repo,
+                                                                                   after: location.y > 20)
+                                                    if accepted { endPinnedDrag() }
+                                                    return accepted
                                                 }
                                             }
                                         }
@@ -1393,12 +1398,20 @@ struct LauncherView: View {
                             }
                             .frame(width: width, height: max(200, geometry.size.height - 48))
                             .background(Palette.column).clipShape(RoundedRectangle(cornerRadius: 8))
+                            .saturation(draggedPinnedOwner != nil && draggedPinnedOwner != owner ? 0.25 : 1)
+                            .opacity(draggedPinnedOwner != nil && draggedPinnedOwner != owner ? 0.58 : 1)
+                            .animation(.easeOut(duration: 0.12), value: draggedPinnedOwner)
                             .overlay {
                                 RoundedRectangle(cornerRadius: 8)
                                     .stroke(dropTarget == owner ? Palette.text : .clear, lineWidth: 2)
                             }
                             .dropDestination(for: String.self) { items, location in
                                 if !notifications && !activity {
+                                    if let draggedPinnedOwner {
+                                        defer { endPinnedDrag() }
+                                        guard draggedPinnedOwner == owner else { return false }
+                                        return receiveColumnPin(items, owner: owner)
+                                    }
                                     if receiveColumnPin(items, owner: owner) { return true }
                                 }
                                 guard let source = items.first, source != owner, owners.contains(source) else { return false }
@@ -1406,8 +1419,15 @@ struct LauncherView: View {
                                                 among: availableOwners)
                                 return true
                             } isTargeted: { targeted in
-                                if targeted { dropTarget = owner }
-                                else if dropTarget == owner { dropTarget = nil }
+                                if targeted {
+                                    if draggedPinnedOwner == nil || draggedPinnedOwner == owner {
+                                        dropTarget = owner
+                                    } else if dropTarget == owner {
+                                        dropTarget = nil
+                                    }
+                                } else if dropTarget == owner {
+                                    dropTarget = nil
+                                }
                             }
                         }
                         if !notifications && !activity {
@@ -1588,6 +1608,24 @@ struct LauncherView: View {
                 library.profiles[owner] = profile
             }
             await library.refresh(priorityOwners: ownerOrder.manualOwners)
+        }
+    }
+
+    private func beginPinnedDrag(_ repository: Repository) -> NSItemProvider {
+        endPinnedDrag()
+        draggedPinnedOwner = repository.owner
+        pinnedDragMouseUpMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp]) { event in
+            DispatchQueue.main.async { endPinnedDrag() }
+            return event
+        }
+        return NSItemProvider(object: repository.usageKey as NSString)
+    }
+
+    private func endPinnedDrag() {
+        draggedPinnedOwner = nil
+        if let monitor = pinnedDragMouseUpMonitor {
+            NSEvent.removeMonitor(monitor)
+            pinnedDragMouseUpMonitor = nil
         }
     }
 
