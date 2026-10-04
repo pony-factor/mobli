@@ -1324,6 +1324,7 @@ struct LauncherView: View {
                     Rectangle().fill(Color.white.opacity(0.07)).frame(height: 1)
                 }
                 .frame(height: PinnedRepositoryItem.height + 16)
+                .padding(.top, -16)
             }
             GeometryReader { geometry in
                 let width: CGFloat = activity ? 360 : (notifications ? 320 : 260)
