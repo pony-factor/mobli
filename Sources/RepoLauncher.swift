@@ -153,7 +153,7 @@ enum FolderSearchFailure: LocalizedError {
 }
 
 enum FolderSearch {
-    static func search(_ rawQuery: String, repositories: [Repository] = [], limit: Int = 16) async throws -> [FolderSearchResult] {
+    static func search(_ rawQuery: String, repositories: [Repository] = [], limit: Int = 64) async throws -> [FolderSearchResult] {
         let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty, limit > 0 else { return [] }
 
@@ -1075,7 +1075,7 @@ struct FolderSearchBar: View {
                 .stroke(focused ? Palette.accent : Color.white.opacity(0.08),
                         lineWidth: focused ? 2 : 1)
         }
-        .overlay(alignment: .top) {
+        .overlay(alignment: .topLeading) {
             if focused && hasQuery {
                 VStack(spacing: 0) {
                     if searching && results.isEmpty {
@@ -1136,7 +1136,7 @@ struct FolderSearchBar: View {
                                 }
                             }
                         }
-                        .frame(height: min(CGFloat(results.count) * 48, 280))
+                        .frame(height: min(CGFloat(results.count) * 48, 480))
                     }
                 }
                 .padding(.vertical, 4)
