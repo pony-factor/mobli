@@ -128,11 +128,20 @@ struct RepositoryCache {
 
 struct FolderSearchResult: Identifiable, Sendable {
     let url: URL
+    var repository: Repository? = nil
 
     var id: String { url.path }
     var name: String { url.lastPathComponent }
-    var parentPath: String { url.deletingLastPathComponent().path }
-    var isRepository: Bool { FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path) }
+    var isCloud: Bool { repository?.isLocal == false }
+    var parentPath: String {
+        if isCloud, let repository { return "GitHub · \(repository.fullName)" }
+        return url.deletingLastPathComponent().path
+    }
+    var isRepository: Bool { repository != nil || FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path) }
+    var githubURL: URL? {
+        guard isCloud, let repository else { return nil }
+        return URL(string: "https://github.com/\(repository.fullName)")
+    }
 }
 
 enum FolderSearchFailure: LocalizedError {
@@ -165,9 +174,9 @@ enum FolderSearch {
             let data = output.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
             let matchingRepositories = repositories.filter {
-                $0.isLocal && $0.fullName.localizedStandardContains(query)
-                    && FileManager.default.fileExists(atPath: $0.url.path)
-            }.map { FolderSearchResult(url: $0.url) }
+                $0.fullName.localizedStandardContains(query)
+                    && (!$0.isLocal || FileManager.default.fileExists(atPath: $0.url.path))
+            }.map { FolderSearchResult(url: $0.url, repository: $0) }
             guard process.terminationStatus == 0 else {
                 if !matchingRepositories.isEmpty { return Array(matchingRepositories.prefix(limit)) }
                 throw FolderSearchFailure.unavailable
@@ -186,6 +195,7 @@ enum FolderSearch {
             }
             return Array(results.sorted { first, second in
                 if first.isRepository != second.isRepository { return first.isRepository }
+                if first.isCloud != second.isCloud { return !first.isCloud }
                 let firstExact = first.name.compare(query, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
                 let secondExact = second.name.compare(query, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
                 if firstExact != secondExact { return firstExact }
@@ -1016,6 +1026,8 @@ struct FolderSearchBar: View {
     let results: [FolderSearchResult]
     let searching: Bool
     let message: String?
+    let cloning: Set<String>
+    let clone: (Repository) -> Void
     let open: (FolderSearchResult) -> Void
     @FocusState private var focused: Bool
     @StateObject private var clickMonitor = SearchClickMonitor()
@@ -1048,7 +1060,7 @@ struct FolderSearchBar: View {
                         .foregroundStyle(Palette.muted)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Clear folder search")
+                .accessibilityLabel("Clear search")
             }
         }
         .padding(.horizontal, 11)
@@ -1067,43 +1079,60 @@ struct FolderSearchBar: View {
             if focused && hasQuery {
                 VStack(spacing: 0) {
                     if searching && results.isEmpty {
-                        searchMessage("Searching folders…")
+                        searchMessage("Searching folders and repositories…")
                     } else if let message {
                         searchMessage(message)
                     } else if results.isEmpty {
-                        searchMessage("No matching folders")
+                        searchMessage("No matching folders or repositories")
                     } else {
                         ScrollView(.vertical) {
                             VStack(spacing: 0) {
                                 ForEach(results) { result in
-                                    Button {
-                                        select(result)
-                                    } label: {
-                                        HStack(spacing: 10) {
-                                            Image(systemName: result.isRepository ? "chevron.left.forwardslash.chevron.right" : "folder")
-                                                .font(.system(size: 13))
-                                                .foregroundStyle(Palette.muted)
-                                            VStack(alignment: .leading, spacing: 2) {
-                                                Text(result.name)
-                                                    .font(.system(size: 13, weight: .medium))
-                                                    .lineLimit(1)
-                                                Text(result.parentPath)
-                                                    .font(.system(size: 10))
+                                    HStack(spacing: 0) {
+                                        Button {
+                                            select(result)
+                                        } label: {
+                                            HStack(spacing: 10) {
+                                                Image(systemName: result.isCloud ? "cloud" : result.isRepository ? "chevron.left.forwardslash.chevron.right" : "folder")
+                                                    .font(.system(size: 13))
                                                     .foregroundStyle(Palette.muted)
-                                                    .lineLimit(1)
-                                                    .truncationMode(.middle)
+                                                VStack(alignment: .leading, spacing: 2) {
+                                                    Text(result.name)
+                                                        .font(.system(size: 13, weight: .medium))
+                                                        .lineLimit(1)
+                                                    Text(result.parentPath)
+                                                        .font(.system(size: 10))
+                                                        .foregroundStyle(Palette.muted)
+                                                        .lineLimit(1)
+                                                        .truncationMode(.middle)
+                                                }
+                                                Spacer(minLength: 8)
+                                                Image(systemName: "arrow.up.right.square")
+                                                    .font(.system(size: 11))
+                                                    .foregroundStyle(Palette.muted)
                                             }
-                                            Spacer(minLength: 8)
-                                            Image(systemName: "arrow.up.right.square")
-                                                .font(.system(size: 11))
-                                                .foregroundStyle(Palette.muted)
+                                            .padding(.horizontal, 11)
+                                            .frame(height: 48)
+                                            .contentShape(Rectangle())
                                         }
-                                        .padding(.horizontal, 11)
-                                        .frame(height: 48)
-                                        .contentShape(Rectangle())
+                                        .buttonStyle(.plain)
+                                        .help(result.isCloud ? "Open \(result.repository?.fullName ?? result.name) on GitHub" : "Open \(result.url.path) in VS Code")
+                                        if result.isCloud, let repo = result.repository {
+                                            Button { clone(repo) } label: {
+                                                if cloning.contains(repo.usageKey) {
+                                                    ProgressView().controlSize(.small)
+                                                } else {
+                                                    Image(systemName: "arrow.down.circle")
+                                                        .foregroundStyle(Palette.accent)
+                                                }
+                                            }
+                                            .buttonStyle(.plain)
+                                            .disabled(cloning.contains(repo.usageKey))
+                                            .padding(.trailing, 11)
+                                            .accessibilityLabel("Clone \(repo.fullName)")
+                                            .help("Clone \(repo.fullName) into ~/GitHub")
+                                        }
                                     }
-                                    .buttonStyle(.plain)
-                                    .help("Open \(result.url.path) in VS Code")
                                 }
                             }
                         }
@@ -1297,9 +1326,15 @@ struct LauncherView: View {
                 }
                 .frame(height: 32)
                 FolderSearchBar(query: $folderQuery, results: folderResults,
-                                searching: folderSearching, message: folderSearchMessage) { result in
+                                searching: folderSearching, message: folderSearchMessage,
+                                cloning: library.cloning,
+                                clone: { repo in Task { await library.clone(repo) } }) { result in
                     folderResults = []
                     folderSearchMessage = nil
+                    if let githubURL = result.githubURL {
+                        NSWorkspace.shared.open(githubURL)
+                        return
+                    }
                     if let repo = library.repos.first(where: {
                         $0.isLocal && $0.url.standardizedFileURL.path == result.url.standardizedFileURL.path
                     }) {
@@ -1502,7 +1537,7 @@ struct LauncherView: View {
         .tint(Palette.accent)
         .frame(minWidth: 650, minHeight: 400)
         .task { await library.refresh(priorityOwners: ownerOrder.manualOwners) }
-        .task(id: folderQuery) {
+        .task(id: [folderQuery] + library.repos.map { "\($0.id):\($0.isLocal)" }) {
             let query = folderQuery.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !query.isEmpty else {
                 folderResults = []

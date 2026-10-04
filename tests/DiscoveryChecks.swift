@@ -1,7 +1,7 @@
 import Foundation
 
 @main struct DiscoveryChecks {
-    static func main() throws {
+    static func main() async throws {
         for remote in ["https://github.com/pony-factor/mobli.git", "git@github.com:pony-factor/mobli.git", "ssh://git@github.com/pony-factor/mobli.git"] {
             precondition(Discovery.githubOwner(from: remote) == "pony-factor")
         }
@@ -100,6 +100,29 @@ import Foundation
         try git(["remote", "remove", "origin"])
         discovered = try Discovery.scan(root)
         precondition(discovered[0].owner == "old-owner")
+
+        // Use a unique name so unrelated Spotlight results cannot crowd out the fixtures.
+        let searchName = "cloud-search-" + UUID().uuidString
+        let localURL = root.appendingPathComponent("old-owner/" + searchName)
+        try FileManager.default.moveItem(at: repo, to: localURL)
+        let local = Repository(url: localURL, owner: "old-owner", lastActivityAt: nil)
+        let cloud = Repository(url: root.appendingPathComponent("cloud-owner/" + searchName), owner: "cloud-owner",
+                               lastActivityAt: nil, cloneURL: URL(string: "https://github.com/cloud-owner/\(searchName).git"))
+        let searchCatalog = [cloud, local]
+        let searchResults = try await FolderSearch.search(searchName, repositories: searchCatalog)
+        let localResult = searchResults.first { $0.id == local.url.path }
+        let cloudResult = searchResults.first { $0.id == cloud.url.path }
+        precondition(localResult?.isCloud == false && localResult?.isRepository == true)
+        precondition(cloudResult?.isCloud == true && cloudResult?.isRepository == true)
+        precondition(cloudResult?.parentPath == "GitHub · cloud-owner/\(searchName)")
+        precondition(cloudResult?.githubURL?.absoluteString == "https://github.com/cloud-owner/\(searchName)")
+        precondition(searchResults.map(\.id) == [local.url.path, cloud.url.path])
+        let ownerResults = try await FolderSearch.search(" CLOUD-OWNER/\(searchName.uppercased()) ", repositories: searchCatalog)
+        precondition(ownerResults.map(\.id) == [cloud.url.path])
+        let limitedResults = try await FolderSearch.search(searchName, repositories: searchCatalog, limit: 1)
+        precondition(limitedResults.count == 1 && limitedResults[0].id == local.url.path)
+        let emptyResults = try await FolderSearch.search("  ", repositories: searchCatalog)
+        precondition(emptyResults.isEmpty)
 
         let cacheDirectory = root.appendingPathComponent("launcher-cache")
         let cache = RepositoryCache(directory: cacheDirectory)
