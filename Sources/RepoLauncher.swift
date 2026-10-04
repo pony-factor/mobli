@@ -1165,6 +1165,47 @@ struct ThinRepositoryScrollbars: NSViewRepresentable {
     }
 }
 
+final class StudioHorizontalScroller: NSScroller {
+    override class var isCompatibleWithOverlayScrollers: Bool { false }
+
+    override func drawKnobSlot(in slotRect: NSRect, highlight flag: Bool) {
+        NSColor(Palette.background).setFill()
+        NSBezierPath(rect: slotRect).fill()
+    }
+
+    override func drawKnob() {
+        let knob = rect(for: .knob).insetBy(dx: 2, dy: 4)
+        NSColor(Palette.accent).setFill()
+        NSBezierPath(roundedRect: knob, xRadius: 4, yRadius: 4).fill()
+    }
+}
+
+struct BottomHorizontalScrollbar: NSViewRepresentable {
+    static let height = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { configure(view) }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { configure(nsView) }
+    }
+
+    private func configure(_ view: NSView) {
+        guard let scrollView = view.enclosingScrollView else { return }
+        if !(scrollView.horizontalScroller is StudioHorizontalScroller) {
+            scrollView.horizontalScroller = StudioHorizontalScroller(
+                frame: NSRect(x: 0, y: 0, width: 100, height: Self.height)
+            )
+        }
+        scrollView.scrollerStyle = .legacy
+        scrollView.hasHorizontalScroller = true
+        scrollView.autohidesScrollers = false
+    }
+}
+
 struct NotificationRow: View {
     let thread: InboxThread
     @ObservedObject var inbox: Inbox
@@ -1242,10 +1283,10 @@ struct LauncherView: View {
                     Button { settings = true } label: {
                         Image(systemName: "gearshape")
                             .font(.system(size: 14, weight: settings ? .semibold : .regular))
-                            .foregroundStyle(settings ? Palette.text : Palette.muted)
+                            .foregroundStyle(settings ? Palette.accent : Palette.muted)
                             .padding(.bottom, 6)
                             .overlay(alignment: .bottom) {
-                                if settings { Rectangle().fill(Palette.text).frame(height: 2) }
+                                if settings { Rectangle().fill(Palette.accent).frame(height: 2) }
                             }
                     }
                     .buttonStyle(.plain)
@@ -1396,7 +1437,7 @@ struct LauncherView: View {
                                     }
                                 }
                             }
-                            .frame(width: width, height: max(200, geometry.size.height - 48))
+                            .frame(width: width, height: max(200, geometry.size.height - 48 - BottomHorizontalScrollbar.height))
                             .background(Palette.column).clipShape(RoundedRectangle(cornerRadius: 8))
                             .saturation(draggedPinnedOwner != nil && draggedPinnedOwner != owner ? 0.25 : 1)
                             .opacity(draggedPinnedOwner != nil && draggedPinnedOwner != owner ? 0.58 : 1)
@@ -1436,9 +1477,10 @@ struct LauncherView: View {
                                 addOrganizationError = nil
                                 addingOrganization = true
                             }
-                            .frame(width: width, height: max(200, geometry.size.height - 48))
+                            .frame(width: width, height: max(200, geometry.size.height - 48 - BottomHorizontalScrollbar.height))
                         }
                     }.padding(24)
+                        .background(BottomHorizontalScrollbar())
                 }
                 .overlay {
                     if (activity || notifications) && owners.isEmpty {
@@ -1645,9 +1687,9 @@ struct LauncherView: View {
     private func tab(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title).font(.system(size: 13, weight: selected ? .semibold : .regular))
-                .foregroundStyle(selected ? Palette.text : Palette.muted)
+                .foregroundStyle(selected ? Palette.accent : Palette.muted)
                 .padding(.bottom, 6)
-                .overlay(alignment: .bottom) { if selected { Rectangle().fill(Palette.text).frame(height: 2) } }
+                .overlay(alignment: .bottom) { if selected { Rectangle().fill(Palette.accent).frame(height: 2) } }
         }
         .buttonStyle(.plain)
         .focusable(false)

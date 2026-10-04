@@ -335,7 +335,7 @@ struct AgendaView: View {
                                         }
                                     }
                                 }
-                            }.frame(width: 320, height: max(200, geometry.size.height))
+                            }.frame(width: 320, height: max(200, geometry.size.height - BottomHorizontalScrollbar.height))
                                 .background(Palette.column).clipShape(RoundedRectangle(cornerRadius: 8))
                                 .overlay {
                                     RoundedRectangle(cornerRadius: 8).stroke(dropStatus == status ? Palette.accent : .clear, lineWidth: 2)
@@ -355,6 +355,7 @@ struct AgendaView: View {
                                 }
                         }
                     }
+                    .background(BottomHorizontalScrollbar())
                 }.overlay {
                     if agenda.items.isEmpty && !agenda.loading && agenda.message == nil {
                         Text(agenda.projects.isEmpty ? "No open projects found for this owner." : "This project has no active items.")
