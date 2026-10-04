@@ -1026,7 +1026,7 @@ struct FolderSearchBar: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12))
                 .foregroundStyle(focused ? Palette.accent : Palette.muted)
-            TextField("Repositories and folders", text: $query)
+            TextField("Find", text: $query)
                 .textFieldStyle(.plain)
                 .focused($focused)
                 .onSubmit {
@@ -1220,7 +1220,7 @@ struct LauncherView: View {
     }
     var body: some View {
         VStack(spacing: 0) {
-            ZStack {
+            ZStack(alignment: .topLeading) {
                 HStack(spacing: 20) {
                     tab("Repositories", selected: !notifications && !activity && !settings && !showingAgenda) { notifications = false; activity = false; settings = false; showingAgenda = false }
                     tab("Agenda", selected: showingAgenda && !settings) { showingAgenda = true; notifications = false; activity = false; settings = false }
@@ -1249,6 +1249,7 @@ struct LauncherView: View {
                     .accessibilityLabel("Settings")
                     .help("Settings")
                 }
+                .frame(height: 32)
                 FolderSearchBar(query: $folderQuery, results: folderResults,
                                 searching: folderSearching, message: folderSearchMessage) { result in
                     folderResults = []
@@ -1260,8 +1261,10 @@ struct LauncherView: View {
                     }
                     library.openFolder(result.url)
                 }
-                .frame(width: 440)
+                .frame(width: 220)
+                .offset(y: 36)
             }
+            .frame(height: !notifications && !activity && !settings && !showingAgenda && !pinnedRepositories.isEmpty ? 32 : 76, alignment: .topLeading)
             .zIndex(50)
             .padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 12)
             if settings {
