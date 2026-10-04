@@ -838,6 +838,9 @@ struct RepositoryRow: View {
 }
 
 struct PinnedRepositoryItem: View {
+    static let width: CGFloat = 260
+    static let height: CGFloat = 60
+
     let repo: Repository
     let profile: OwnerProfile?
     let open: () -> Void
@@ -847,24 +850,24 @@ struct PinnedRepositoryItem: View {
     var body: some View {
         HStack(spacing: 0) {
             Button(action: open) {
-                HStack(spacing: 8) {
+                HStack(spacing: 10) {
                     if let data = profile?.avatar, let image = NSImage(data: data) {
                         Image(nsImage: image).resizable().scaledToFit()
-                            .frame(width: 22, height: 22).clipShape(RoundedRectangle(cornerRadius: 5))
+                            .frame(width: 32, height: 32).clipShape(RoundedRectangle(cornerRadius: 5))
                     } else {
                         Text(String(repo.owner.prefix(1)).uppercased())
-                            .font(.system(size: 11, weight: .bold))
-                            .frame(width: 22, height: 22)
+                            .font(.system(size: 16, weight: .bold))
+                            .frame(width: 32, height: 32)
                             .background(Color.white.opacity(0.06))
                             .clipShape(RoundedRectangle(cornerRadius: 5))
                     }
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(repo.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                        Text(repo.owner).font(.system(size: 10)).foregroundStyle(Palette.muted).lineLimit(1)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(repo.name).font(.system(size: 16, weight: .semibold)).lineLimit(1)
+                        Text(repo.owner).font(.system(size: 12)).foregroundStyle(Palette.muted).lineLimit(1)
                     }
                     Spacer(minLength: 0)
                 }
-                .padding(.leading, 10).padding(.vertical, 7)
+                .padding(.leading, 12).padding(.vertical, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
@@ -873,15 +876,15 @@ struct PinnedRepositoryItem: View {
 
             Button(action: togglePin) {
                 Image(systemName: "pin.slash")
-                    .font(.system(size: 11))
+                    .font(.system(size: 13))
                     .foregroundStyle(Palette.muted)
-                    .padding(9)
+                    .padding(12)
             }
             .buttonStyle(.plain)
             .help("Unpin \(repo.name)")
             .accessibilityLabel("Unpin \(repo.name)")
         }
-        .frame(width: 210, height: 42)
+        .frame(width: Self.width, height: Self.height)
         .background(hovered ? Color.white.opacity(0.07) : Palette.column)
         .clipShape(RoundedRectangle(cornerRadius: 7))
         .contentShape(Rectangle())
@@ -1026,7 +1029,7 @@ struct FolderSearchBar: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12))
                 .foregroundStyle(focused ? Palette.accent : Palette.muted)
-            TextField("Repositories and folders", text: $query)
+            TextField("Find", text: $query)
                 .textFieldStyle(.plain)
                 .focused($focused)
                 .onSubmit {
@@ -1222,7 +1225,7 @@ struct LauncherView: View {
     }
     var body: some View {
         VStack(spacing: 0) {
-            ZStack {
+            ZStack(alignment: .topLeading) {
                 HStack(spacing: 20) {
                     tab("Repositories", selected: !notifications && !activity && !settings && !showingAgenda) { notifications = false; activity = false; settings = false; showingAgenda = false }
                     tab("Agenda", selected: showingAgenda && !settings) { showingAgenda = true; notifications = false; activity = false; settings = false }
@@ -1251,6 +1254,7 @@ struct LauncherView: View {
                     .accessibilityLabel("Settings")
                     .help("Settings")
                 }
+                .frame(height: 32)
                 FolderSearchBar(query: $folderQuery, results: folderResults,
                                 searching: folderSearching, message: folderSearchMessage) { result in
                     folderResults = []
@@ -1262,8 +1266,10 @@ struct LauncherView: View {
                     }
                     library.openFolder(result.url)
                 }
-                .frame(width: 440)
+                .frame(width: 220)
+                .offset(y: 36)
             }
+            .frame(height: !notifications && !activity && !settings && !showingAgenda && !pinnedRepositories.isEmpty ? 32 : 76, alignment: .topLeading)
             .zIndex(50)
             .padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 12)
             if settings {
@@ -1301,7 +1307,7 @@ struct LauncherView: View {
                                               pinnedRepositories.contains(where: { $0.usageKey == source }),
                                               source != repo.usageKey else { return false }
                                         repoUsage.movePinned(source, relativeTo: repo.usageKey,
-                                                             after: location.x > 105)
+                                                             after: location.x > PinnedRepositoryItem.width / 2)
                                         endPinnedDrag()
                                         return true
                                     } isTargeted: { targeted in
@@ -1317,7 +1323,7 @@ struct LauncherView: View {
                     .padding(.horizontal, 24)
                     Rectangle().fill(Color.white.opacity(0.07)).frame(height: 1)
                 }
-                .frame(height: 58)
+                .frame(height: PinnedRepositoryItem.height + 16)
             }
             GeometryReader { geometry in
                 let width: CGFloat = activity ? 360 : (notifications ? 320 : 260)
