@@ -762,11 +762,53 @@ enum OwnerOrdering {
 }
 
 enum Palette {
-    static let accent = Color(red: 67.0 / 255, green: 175.0 / 255, blue: 73.0 / 255)
-    static let background = Color(red: 0.065, green: 0.075, blue: 0.095)
-    static let column = Color(red: 0.09, green: 0.105, blue: 0.13)
-    static let text = Color(red: 0.87, green: 0.90, blue: 0.94)
-    static let muted = Color(red: 0.48, green: 0.55, blue: 0.64)
+    static let backgroundKey = "studio.repository-launcher.theme-background"
+    static let columnKey = "studio.repository-launcher.theme-column"
+    static let accentKey = "studio.repository-launcher.theme-accent"
+    static let textKey = "studio.repository-launcher.theme-text"
+    static let mutedKey = "studio.repository-launcher.theme-muted"
+
+    static let defaultBackground = "#000000"
+    static let defaultColumn = "#171B21"
+    static let defaultAccent = "#43AF49"
+    static let defaultText = "#DEE5F0"
+    static let defaultMuted = "#7A8CA3"
+
+    static var background: Color { storedColor(backgroundKey, fallback: defaultBackground) }
+    static var column: Color { storedColor(columnKey, fallback: defaultColumn) }
+    static var accent: Color { storedColor(accentKey, fallback: defaultAccent) }
+    static var text: Color { storedColor(textKey, fallback: defaultText) }
+    static var muted: Color { storedColor(mutedKey, fallback: defaultMuted) }
+
+    static func color(hex: String, fallback: String) -> Color {
+        let normalized = normalizeHex(hex) ?? normalizeHex(fallback) ?? "#000000"
+        let digits = String(normalized.dropFirst())
+        guard let value = UInt64(digits, radix: 16) else { return .black }
+        return Color(
+            red: Double((value >> 16) & 0xFF) / 255,
+            green: Double((value >> 8) & 0xFF) / 255,
+            blue: Double(value & 0xFF) / 255
+        )
+    }
+
+    static func normalizeHex(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let digits = trimmed.hasPrefix("#") ? String(trimmed.dropFirst()) : trimmed
+        guard digits.count == 6, UInt64(digits, radix: 16) != nil else { return nil }
+        return "#" + digits.uppercased()
+    }
+
+    static func hexString(from color: Color) -> String? {
+        guard let rgb = NSColor(color).usingColorSpace(.sRGB) else { return nil }
+        let red = Int((rgb.redComponent * 255).rounded())
+        let green = Int((rgb.greenComponent * 255).rounded())
+        let blue = Int((rgb.blueComponent * 255).rounded())
+        return String(format: "#%02X%02X%02X", red, green, blue)
+    }
+
+    private static func storedColor(_ key: String, fallback: String) -> Color {
+        color(hex: UserDefaults.standard.string(forKey: key) ?? fallback, fallback: fallback)
+    }
 }
 
 struct RepositoryRow: View {
@@ -1286,6 +1328,11 @@ struct LauncherView: View {
     @State private var pinnedDragMouseUpMonitor: Any?
     @AppStorage("studio.repository-launcher.show-repository-counts") private var showRepositoryCounts = true
     @AppStorage("studio.repository-launcher.show-owner-slugs") private var showOwnerSlugs = true
+    @AppStorage(Palette.backgroundKey) private var themeBackground = Palette.defaultBackground
+    @AppStorage(Palette.columnKey) private var themeColumn = Palette.defaultColumn
+    @AppStorage(Palette.accentKey) private var themeAccent = Palette.defaultAccent
+    @AppStorage(Palette.textKey) private var themeText = Palette.defaultText
+    @AppStorage(Palette.mutedKey) private var themeMuted = Palette.defaultMuted
     @State private var addingOrganization = false
     @State private var newOrganization = ""
     @State private var addOrganizationError: String?
@@ -1651,6 +1698,21 @@ struct LauncherView: View {
                 Toggle("Show repository counts in each category", isOn: $showRepositoryCounts)
                 Toggle("Show GitHub owner slugs beneath display names", isOn: $showOwnerSlugs)
                 VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("Appearance").font(.system(size: 15, weight: .semibold))
+                        Spacer()
+                        Button("Reset colors") { resetTheme() }
+                            .buttonStyle(.borderless)
+                    }
+                    Text("Customize the launcher palette. Changes apply immediately and are saved automatically.")
+                        .font(.system(size: 12)).foregroundStyle(Palette.muted)
+                    themeColorRow("Background", value: $themeBackground, defaultHex: Palette.defaultBackground)
+                    themeColorRow("Columns & cards", value: $themeColumn, defaultHex: Palette.defaultColumn)
+                    themeColorRow("Accent", value: $themeAccent, defaultHex: Palette.defaultAccent)
+                    themeColorRow("Primary text", value: $themeText, defaultHex: Palette.defaultText)
+                    themeColorRow("Muted text", value: $themeMuted, defaultHex: Palette.defaultMuted)
+                }
+                VStack(alignment: .leading, spacing: 12) {
                     Text("Organization order").font(.system(size: 15, weight: .semibold))
                     Text("Drag organization headers on the Repositories, Activity, or Notifications page, or use the arrows below.")
                         .font(.system(size: 12)).foregroundStyle(Palette.muted)
@@ -1678,6 +1740,42 @@ struct LauncherView: View {
             .padding(24).frame(maxWidth: 650, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private func themeColorRow(_ title: String, value: Binding<String>, defaultHex: String) -> some View {
+        HStack(spacing: 12) {
+            Text(title)
+            Spacer()
+            TextField("#000000", text: value)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 11, design: .monospaced))
+                .frame(width: 92)
+                .onSubmit {
+                    value.wrappedValue = Palette.normalizeHex(value.wrappedValue) ?? defaultHex
+                }
+            ColorPicker(
+                title,
+                selection: Binding(
+                    get: { Palette.color(hex: value.wrappedValue, fallback: defaultHex) },
+                    set: { color in
+                        if let hex = Palette.hexString(from: color) {
+                            value.wrappedValue = hex
+                        }
+                    }
+                ),
+                supportsOpacity: false
+            )
+            .labelsHidden()
+            .frame(width: 30)
+        }
+    }
+
+    private func resetTheme() {
+        themeBackground = Palette.defaultBackground
+        themeColumn = Palette.defaultColumn
+        themeAccent = Palette.defaultAccent
+        themeText = Palette.defaultText
+        themeMuted = Palette.defaultMuted
     }
 
     private func addOrganization() {
