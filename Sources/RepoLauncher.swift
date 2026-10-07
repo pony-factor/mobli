@@ -25,6 +25,14 @@ struct Repository: Identifiable, Codable, Sendable {
     var fullName: String { owner + "/" + repositoryName }
     var usageKey: String { fullName.lowercased() }
     var isLocal: Bool { cloneURL == nil }
+    var githubURL: URL? {
+        guard owner != "Local" else { return nil }
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "github.com"
+        components.path = "/\(owner)/\(repositoryName)"
+        return components.url
+    }
     var isWorktree: Bool { isLocal && gitCommonDirectory != nil }
     var displayName: String { isWorktree ? repositoryName : name }
     var worktreeDetail: String? {
@@ -952,6 +960,56 @@ enum Palette {
     }
 }
 
+struct SecondaryClickRegion: NSViewRepresentable {
+    let action: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(action: action) }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        context.coordinator.view = view
+        context.coordinator.start()
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.action = action
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.stop()
+    }
+
+    final class Coordinator {
+        weak var view: NSView?
+        var action: () -> Void
+        private var monitor: Any?
+
+        init(action: @escaping () -> Void) {
+            self.action = action
+        }
+
+        func start() {
+            stop()
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .rightMouseDown) { [weak self] event in
+                guard let self,
+                      let view,
+                      view.window === event.window,
+                      view.bounds.contains(view.convert(event.locationInWindow, from: nil)) else { return event }
+                action()
+                return nil
+            }
+        }
+
+        func stop() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
+
+        deinit { stop() }
+    }
+}
+
 struct RepositoryRow: View {
     let repo: Repository
     let pinned: Bool
@@ -989,6 +1047,9 @@ struct RepositoryRow: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(repo.displayName).font(.system(size: 15, weight: .medium)).lineLimit(2)
                                 .multilineTextAlignment(.leading)
+                                .background(SecondaryClickRegion {
+                                    if let url = repo.githubURL { NSWorkspace.shared.open(url) }
+                                })
                             if let detail = repo.worktreeDetail {
                                 Text(detail).font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(1)
                             }
@@ -1013,6 +1074,9 @@ struct RepositoryRow: View {
                         .foregroundStyle(Palette.muted)
                     Text(repo.name).font(.system(size: 15, weight: .medium)).lineLimit(2)
                         .multilineTextAlignment(.leading)
+                        .background(SecondaryClickRegion {
+                            if let url = repo.githubURL { NSWorkspace.shared.open(url) }
+                        })
                     Spacer(minLength: 0)
                 }
                 .foregroundStyle(Palette.text)
@@ -1104,6 +1168,9 @@ struct PinnedRepositoryItem: View {
                     }
                     VStack(alignment: .leading, spacing: 3) {
                         Text(repo.name).font(.system(size: 16, weight: .semibold)).lineLimit(1)
+                            .background(SecondaryClickRegion {
+                                if let url = repo.githubURL { NSWorkspace.shared.open(url) }
+                            })
                         Text(repo.owner).font(.system(size: 12)).foregroundStyle(Palette.muted).lineLimit(1)
                     }
                     Spacer(minLength: 0)
