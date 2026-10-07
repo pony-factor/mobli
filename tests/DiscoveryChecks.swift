@@ -161,6 +161,22 @@ import Foundation
         let emptyResults = try await FolderSearch.search("  ", repositories: searchCatalog)
         precondition(emptyResults.isEmpty)
 
+        // Plain folders must match partial text anywhere in the folder name, including the suffix,
+        // without relying on Spotlight having indexed the temporary fixture.
+        let suffixFolderName = "prefix-" + searchName + "-tail"
+        let suffixFolder = root.appendingPathComponent("plain-folders/" + suffixFolderName)
+        try FileManager.default.createDirectory(at: suffixFolder, withIntermediateDirectories: true)
+        let suffixQuery = String(suffixFolderName.suffix(18)).uppercased()
+        let suffixResults = try await FolderSearch.search(suffixQuery, repositories: [],
+                                                          fallbackRoots: [root])
+        precondition(suffixResults.contains {
+            $0.url.standardizedFileURL.path == suffixFolder.standardizedFileURL.path
+        })
+        precondition(FolderSearch.matchesName(suffixFolderName, query: suffixQuery))
+        let fallbackNames = Set(FolderSearch.defaultFallbackRoots.map(\.lastPathComponent))
+        precondition(fallbackNames.contains("GitHub"))
+        precondition(fallbackNames.contains("Desktop"))
+
         let cacheDirectory = root.appendingPathComponent("launcher-cache")
         let cache = RepositoryCache(directory: cacheDirectory)
         precondition(cache.load(root: root) == nil)
