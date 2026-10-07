@@ -959,7 +959,7 @@ enum OwnerOrdering {
             Task { @MainActor in
                 if process.terminationStatus == 0 {
                     if let vsCode = NSRunningApplication.runningApplications(withBundleIdentifier: vsCodeBundleIdentifier).first {
-                        _ = vsCode.activate(options: [.activateAllWindows])
+                        _ = vsCode.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
                     }
                     return
                 }
