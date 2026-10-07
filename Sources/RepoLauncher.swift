@@ -983,18 +983,21 @@ enum OwnerOrdering {
 enum Palette {
     static let backgroundKey = "studio.repository-launcher.theme-background"
     static let columnKey = "studio.repository-launcher.theme-column"
+    static let columnInteriorKey = "studio.repository-launcher.theme-column-interior"
     static let accentKey = "studio.repository-launcher.theme-accent"
     static let textKey = "studio.repository-launcher.theme-text"
     static let mutedKey = "studio.repository-launcher.theme-muted"
 
     static let defaultBackground = "#000000"
     static let defaultColumn = "#171B21"
+    static let defaultColumnInterior = "#171B21"
     static let defaultAccent = "#43AF49"
     static let defaultText = "#DEE5F0"
     static let defaultMuted = "#7A8CA3"
 
     static var background: Color { storedColor(backgroundKey, fallback: defaultBackground) }
     static var column: Color { storedColor(columnKey, fallback: defaultColumn) }
+    static var columnInterior: Color { storedColor(columnInteriorKey, fallback: defaultColumnInterior) }
     static var accent: Color { storedColor(accentKey, fallback: defaultAccent) }
     static var text: Color { storedColor(textKey, fallback: defaultText) }
     static var muted: Color { storedColor(mutedKey, fallback: defaultMuted) }
@@ -1644,6 +1647,14 @@ struct NotificationRow: View {
     }
 }
 
+enum SettingsSection: String, CaseIterable, Identifiable {
+    case appearance = "Appearance"
+    case repositories = "Repositories"
+    case organizations = "Organizations"
+
+    var id: String { rawValue }
+}
+
 struct LauncherView: View {
     @StateObject private var library = Library()
     @StateObject private var inbox = Inbox()
@@ -1654,6 +1665,7 @@ struct LauncherView: View {
     @State private var activity = false
     @State private var showingAgenda = false
     @State private var settings = false
+    @State private var settingsSection: SettingsSection = .appearance
     @State private var dropTarget: String?
     @State private var pinnedDropTarget: String?
     @State private var draggedPinnedOwner: String?
@@ -1662,6 +1674,7 @@ struct LauncherView: View {
     @AppStorage("studio.repository-launcher.show-owner-slugs") private var showOwnerSlugs = true
     @AppStorage(Palette.backgroundKey) private var themeBackground = Palette.defaultBackground
     @AppStorage(Palette.columnKey) private var themeColumn = Palette.defaultColumn
+    @AppStorage(Palette.columnInteriorKey) private var themeColumnInterior = Palette.defaultColumnInterior
     @AppStorage(Palette.accentKey) private var themeAccent = Palette.defaultAccent
     @AppStorage(Palette.textKey) private var themeText = Palette.defaultText
     @AppStorage(Palette.mutedKey) private var themeMuted = Palette.defaultMuted
@@ -1696,7 +1709,10 @@ struct LauncherView: View {
                     }
                     tab("Activity", selected: activity && !settings) { notifications = false; activity = true; settings = false; showingAgenda = false }
                     tab("Notifications", selected: notifications && !settings) { notifications = true; activity = false; settings = false; showingAgenda = false }
-                    Button { settings = true } label: {
+                    Button {
+                        settingsSection = .appearance
+                        settings = true
+                    } label: {
                         Image(systemName: "gearshape")
                             .font(.system(size: 14, weight: settings ? .semibold : .regular))
                             .foregroundStyle(settings ? Palette.accent : Palette.muted)
@@ -1812,6 +1828,7 @@ struct LauncherView: View {
                                             }
                                         }.padding(.vertical, 4)
                                     }
+                                    .background(Palette.columnInterior)
                                 } else if notifications {
                                     let threads = inbox.threads.filter { $0.owner == owner }
                                     OwnerHeader(owner: owner, profile: inbox.profiles[owner], subtitle: "\(threads.count) unread", showOwnerSlugs: showOwnerSlugs)
@@ -1821,6 +1838,7 @@ struct LauncherView: View {
                                             ForEach(threads) { thread in NotificationRow(thread: thread, inbox: inbox) }
                                         }.padding(.vertical, 4)
                                     }
+                                    .background(Palette.columnInterior)
                                 } else {
                                     let ownerRepositories = library.repositories(for: owner)
                                     let repositories = repoUsage.ranked(ownerRepositories.filter {
@@ -1863,6 +1881,7 @@ struct LauncherView: View {
                                         .padding(.vertical, 4)
                                         .background(ThinRepositoryScrollbars())
                                     }
+                                    .background(Palette.columnInterior)
                                 }
                             }
                             .frame(width: width, height: max(200, geometry.size.height - 48 - BottomHorizontalScrollbar.height))
@@ -2024,59 +2043,129 @@ struct LauncherView: View {
     }
     private var settingsPage: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 20) {
                 Text("Settings").font(.system(size: 22, weight: .semibold))
-                Text(library.refreshing || inbox.loading || activityFeed.loading
-                     ? "Refreshing local and GitHub repositories, owner profiles, notifications, and activity…"
-                     : "Opening Settings refreshes local and GitHub repositories, owner profiles, notifications, and activity.")
-                    .font(.system(size: 12)).foregroundStyle(Palette.muted)
-                if let githubMessage = library.githubMessage {
-                    Text(githubMessage).font(.system(size: 12)).foregroundStyle(Palette.muted)
+                HStack(spacing: 8) {
+                    ForEach(SettingsSection.allCases) { section in
+                        Button {
+                            settingsSection = section
+                        } label: {
+                            Text(section.rawValue)
+                                .font(.system(size: 13, weight: settingsSection == section ? .semibold : .regular))
+                                .foregroundStyle(settingsSection == section ? Palette.text : Palette.muted)
+                                .padding(.horizontal, 12)
+                                .frame(height: 32)
+                                .background(settingsSection == section ? Palette.accent.opacity(0.16) : Color.clear)
+                                .clipShape(RoundedRectangle(cornerRadius: 7))
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(library.refreshing || inbox.loading || activityFeed.loading
+                         ? "Refreshing local and GitHub repositories, owner profiles, notifications, and activity…"
+                         : "Settings are saved automatically.")
+                    if let githubMessage = library.githubMessage {
+                        Text(githubMessage)
+                    }
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
+
+                switch settingsSection {
+                case .appearance:
+                    appearanceSettings
+                case .repositories:
+                    repositorySettings
+                case .organizations:
+                    organizationSettings
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: 760, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var appearanceSettings: some View {
+        settingsBlock {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Colors").font(.system(size: 15, weight: .semibold))
+                    Text("Customize Mobli’s palette. Changes apply immediately.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.muted)
+                }
+                Spacer()
+                Button("Reset colors") { resetTheme() }
+                    .buttonStyle(.borderless)
+            }
+            Divider().overlay(Color.white.opacity(0.08))
+            themeColorRow("Background", value: $themeBackground, defaultHex: Palette.defaultBackground)
+            themeColorRow("Columns & cards", value: $themeColumn, defaultHex: Palette.defaultColumn)
+            themeColorRow("Column interiors", value: $themeColumnInterior, defaultHex: Palette.defaultColumnInterior)
+            themeColorRow("Accent", value: $themeAccent, defaultHex: Palette.defaultAccent)
+            themeColorRow("Primary text", value: $themeText, defaultHex: Palette.defaultText)
+            themeColorRow("Muted text", value: $themeMuted, defaultHex: Palette.defaultMuted)
+        }
+    }
+
+    private var repositorySettings: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            settingsBlock {
+                Text("Repository display").font(.system(size: 15, weight: .semibold))
                 Toggle("Show repository counts in each category", isOn: $showRepositoryCounts)
                 Toggle("Show GitHub owner slugs beneath display names", isOn: $showOwnerSlugs)
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Text("Appearance").font(.system(size: 15, weight: .semibold))
-                        Spacer()
-                        Button("Reset colors") { resetTheme() }
-                            .buttonStyle(.borderless)
-                    }
-                    Text("Customize the launcher palette. Changes apply immediately and are saved automatically.")
-                        .font(.system(size: 12)).foregroundStyle(Palette.muted)
-                    themeColorRow("Background", value: $themeBackground, defaultHex: Palette.defaultBackground)
-                    themeColorRow("Columns & cards", value: $themeColumn, defaultHex: Palette.defaultColumn)
-                    themeColorRow("Accent", value: $themeAccent, defaultHex: Palette.defaultAccent)
-                    themeColorRow("Primary text", value: $themeText, defaultHex: Palette.defaultText)
-                    themeColorRow("Muted text", value: $themeMuted, defaultHex: Palette.defaultMuted)
-                }
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Organization order").font(.system(size: 15, weight: .semibold))
-                    Text("Drag organization headers on the Repositories, Activity, or Notifications page, or use the arrows below.")
-                        .font(.system(size: 12)).foregroundStyle(Palette.muted)
-                    let orderedOwners = ownerOrder.ordered(library.owners + ownerOrder.manualOwners + inbox.owners)
-                    ForEach(Array(orderedOwners.enumerated()), id: \.element) { index, owner in
-                        HStack {
-                            Text(library.profiles[owner]?.displayName ?? inbox.profiles[owner]?.displayName ?? owner)
-                            Spacer()
-                            Button {
-                                ownerOrder.move(owner, relativeTo: orderedOwners[index - 1], after: false, among: orderedOwners)
-                            } label: { Image(systemName: "arrow.up") }
-                            .disabled(index == 0).help("Move \(owner) earlier")
-                            .accessibilityLabel("Move \(owner) earlier")
-                            Button {
-                                ownerOrder.move(owner, relativeTo: orderedOwners[index + 1], after: true, among: orderedOwners)
-                            } label: { Image(systemName: "arrow.down") }
-                            .disabled(index == orderedOwners.count - 1).help("Move \(owner) later")
-                            .accessibilityLabel("Move \(owner) later")
-                        }
-                    }
-                }
-                Text("Pinned local repositories move into the centered bar above the organization columns. Drag a top pin into its organization column to keep it pinned there, then drag column pins to reorder them. A cloud marks a GitHub repository that is not local yet; use its download button to clone it into ~/GitHub. Pin order and organization order are saved automatically.")
-                    .font(.system(size: 12)).foregroundStyle(Palette.muted)
             }
-            .padding(24).frame(maxWidth: 650, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            settingsBlock {
+                Text("Pinned repositories").font(.system(size: 15, weight: .semibold))
+                Text("Pinned local repositories move into the centered bar above the organization columns. Drag a top pin into its organization column to keep it pinned there, then drag column pins to reorder them. A cloud marks a GitHub repository that is not local yet; use its download button to clone it into ~/GitHub.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.muted)
+            }
+        }
+    }
+
+    private var organizationSettings: some View {
+        let orderedOwners = ownerOrder.ordered(library.owners + ownerOrder.manualOwners + inbox.owners)
+        return settingsBlock {
+            Text("Organization order").font(.system(size: 15, weight: .semibold))
+            Text("Drag organization headers on the Repositories, Activity, or Notifications page, or use the arrows below.")
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
+            Divider().overlay(Color.white.opacity(0.08))
+            ForEach(Array(orderedOwners.enumerated()), id: \.element) { index, owner in
+                HStack {
+                    Text(library.profiles[owner]?.displayName ?? inbox.profiles[owner]?.displayName ?? owner)
+                    Spacer()
+                    Button {
+                        ownerOrder.move(owner, relativeTo: orderedOwners[index - 1], after: false, among: orderedOwners)
+                    } label: { Image(systemName: "arrow.up") }
+                    .disabled(index == 0)
+                    .help("Move \(owner) earlier")
+                    .accessibilityLabel("Move \(owner) earlier")
+                    Button {
+                        ownerOrder.move(owner, relativeTo: orderedOwners[index + 1], after: true, among: orderedOwners)
+                    } label: { Image(systemName: "arrow.down") }
+                    .disabled(index == orderedOwners.count - 1)
+                    .help("Move \(owner) later")
+                    .accessibilityLabel("Move \(owner) later")
+                }
+            }
+        }
+    }
+
+    private func settingsBlock<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            content()
+        }
+        .padding(16)
+        .background(Palette.column)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
         }
     }
 
@@ -2111,6 +2200,7 @@ struct LauncherView: View {
     private func resetTheme() {
         themeBackground = Palette.defaultBackground
         themeColumn = Palette.defaultColumn
+        themeColumnInterior = Palette.defaultColumnInterior
         themeAccent = Palette.defaultAccent
         themeText = Palette.defaultText
         themeMuted = Palette.defaultMuted
