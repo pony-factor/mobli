@@ -8,6 +8,14 @@
 		<data>
 		Nfk8H0mnBn8ufwzSSDi29iHRv2c=
 		</data>
+		<key>Resources/auto-update.sh</key>
+		<data>
+		fpZgJN+WrszD9jHnCQ8kXPFGM/w=
+		</data>
+		<key>Resources/source-root.txt</key>
+		<data>
+		77UMuxAMPgfhsiLtd/igBfkAUnw=
+		</data>
 	</dict>
 	<key>files2</key>
 	<dict>
@@ -16,6 +24,20 @@
 			<key>hash2</key>
 			<data>
 			CPqEUfMPz7W+oq5SecRZJT4mWSxZqcM+PDBegagAIuw=
+			</data>
+		</dict>
+		<key>Resources/auto-update.sh</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			5l6hxJ2pfeDbNWNdUoZysJZhu9VQDYnUC6bzdx7YJVg=
+			</data>
+		</dict>
+		<key>Resources/source-root.txt</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			p1tJNlNIMVvsi9RpcIfdgxX8AHsnFCOcfpkITEoo3pI=
 			</data>
 		</dict>
 	</dict>
