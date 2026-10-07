@@ -1792,7 +1792,13 @@ struct LauncherView: View {
                                                 Text(activityFeed.loading ? "Loading activity…" : "No recent pull-request activity")
                                                     .font(.system(size: 12)).foregroundStyle(Palette.muted).padding(12)
                                             } else {
-                                                ForEach(items) { item in ActivityRow(item: item) }
+                                                ForEach(items) { item in
+                                                    ActivityRow(
+                                                        item: item,
+                                                        merging: activityFeed.merging.contains(item.id),
+                                                        squashMerge: { Task { await activityFeed.squashMerge(item) } }
+                                                    )
+                                                }
                                             }
                                         }.padding(.vertical, 4)
                                     }

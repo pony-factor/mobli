@@ -61,6 +61,17 @@ import Foundation
         precondition(items.contains { $0.kind.label == "review" && $0.preview == "approved" })
         precondition(items.contains { $0.kind.label == "review comment" && $0.preview == "Inline comment" })
         precondition(items.allSatisfy { $0.owner == "example" && $0.repository == "project" && $0.number == 42 })
-        print("PASS: GraphQL PR activity decoding, comments, reviews, inline review comments, and chronology")
+        precondition(items.allSatisfy { !$0.canSquashMerge })
+
+        let openFixture = fixture
+            .replacingOccurrences(of: "\"state\": \"MERGED\"", with: "\"state\": \"OPEN\"")
+            .replacingOccurrences(of: "\"mergedAt\": \"2026-10-02T12:00:00Z\"", with: "\"mergedAt\": null")
+            .replacingOccurrences(of: "\"closedAt\": \"2026-10-02T12:00:00Z\"", with: "\"closedAt\": null")
+        let openItems = try GitHubActivity.parse(Data(openFixture.utf8))
+        precondition(openItems.contains { $0.kind.label == "pull request opened" && $0.canSquashMerge })
+        precondition(GitHubActivity.mergeEndpoint(owner: "example", repository: "project", number: 42)
+                     == "/repos/example/project/pulls/42/merge")
+
+        print("PASS: GraphQL PR activity decoding, comments, reviews, inline review comments, chronology, and squash-merge eligibility")
     }
 }

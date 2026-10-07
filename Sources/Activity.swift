@@ -44,6 +44,7 @@ struct ActivityItem: Identifiable, Sendable {
     let body: String?
     let date: Date
     let url: URL
+    let canSquashMerge: Bool
 
     var preview: String? {
         guard let body else { return nil }
@@ -53,13 +54,14 @@ struct ActivityItem: Identifiable, Sendable {
 }
 
 enum ActivityFailure: LocalizedError, Equatable, Sendable {
-    case missingCLI, signIn, request
+    case missingCLI, signIn, request, merge
 
     var errorDescription: String? {
         switch self {
         case .missingCLI: return "Install GitHub CLI to load organization activity."
         case .signIn: return "Connect GitHub to load organization activity."
         case .request: return "Couldn’t refresh organization activity. Check your connection and try again."
+        case .merge: return "Couldn’t squash and merge this pull request. Check GitHub and try again."
         }
     }
 }
@@ -237,6 +239,47 @@ actor GitHubActivity {
         return items
     }
 
+    static func mergeEndpoint(owner: String, repository: String, number: Int) -> String {
+        "/repos/\(owner)/\(repository)/pulls/\(number)/merge"
+    }
+
+    func squashMerge(_ item: ActivityItem) async throws {
+        guard item.canSquashMerge else { return }
+        guard let executable = Self.executable else { throw ActivityFailure.missingCLI }
+        let arguments = [
+            "api", "--hostname", "github.com", "--method", "PUT",
+            "-H", "Accept: application/vnd.github+json",
+            "-H", "X-GitHub-Api-Version: 2026-03-10",
+            Self.mergeEndpoint(owner: item.owner, repository: item.repository, number: item.number),
+            "-f", "merge_method=squash"
+        ]
+        let result = try await Task.detached {
+            let process = Process()
+            let output = Pipe()
+            process.executableURL = URL(fileURLWithPath: executable)
+            process.arguments = arguments
+            process.standardOutput = output
+            process.standardError = output
+            process.standardInput = FileHandle.nullDevice
+            try process.run()
+            let timeout = DispatchWorkItem { if process.isRunning { process.terminate() } }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 45, execute: timeout)
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            timeout.cancel()
+            return (data, process.terminationStatus)
+        }.value
+
+        guard result.1 == 0 else {
+            let text = String(decoding: result.0, as: UTF8.self).lowercased()
+            if text.contains("auth login") || text.contains("authentication") || text.contains("http 401") {
+                throw ActivityFailure.signIn
+            }
+            throw ActivityFailure.merge
+        }
+        cache.removeValue(forKey: item.owner.lowercased())
+    }
+
     private func fetchSearch(_ search: String) async throws -> [ActivityItem] {
         guard let executable = Self.executable else { throw ActivityFailure.missingCLI }
         let arguments = [
@@ -290,6 +333,7 @@ actor GitHubActivity {
         for pullRequest in payload.search.nodes.compactMap({ $0 }) {
             let owner = pullRequest.repository.owner.login
             let repository = pullRequest.repository.name
+            let canSquashMerge = pullRequest.state == "OPEN"
 
             if let created = parseDate(pullRequest.createdAt) {
                 items.append(ActivityItem(
@@ -302,7 +346,8 @@ actor GitHubActivity {
                     actor: pullRequest.author?.login,
                     body: nil,
                     date: created,
-                    url: pullRequest.url
+                    url: pullRequest.url,
+                    canSquashMerge: canSquashMerge
                 ))
             }
 
@@ -317,7 +362,8 @@ actor GitHubActivity {
                     actor: pullRequest.mergedBy?.login,
                     body: nil,
                     date: mergedAt,
-                    url: pullRequest.url
+                    url: pullRequest.url,
+                    canSquashMerge: false
                 ))
             } else if pullRequest.state == "CLOSED", let closedAt = pullRequest.closedAt.flatMap(parseDate) {
                 items.append(ActivityItem(
@@ -330,7 +376,8 @@ actor GitHubActivity {
                     actor: nil,
                     body: nil,
                     date: closedAt,
-                    url: pullRequest.url
+                    url: pullRequest.url,
+                    canSquashMerge: false
                 ))
             }
 
@@ -346,7 +393,8 @@ actor GitHubActivity {
                     actor: comment.author?.login,
                     body: comment.bodyText,
                     date: date,
-                    url: comment.url
+                    url: comment.url,
+                    canSquashMerge: false
                 ))
             }
 
@@ -364,7 +412,8 @@ actor GitHubActivity {
                     actor: review.author?.login,
                     body: body,
                     date: date,
-                    url: review.url
+                    url: review.url,
+                    canSquashMerge: false
                 ))
             }
 
@@ -381,7 +430,8 @@ actor GitHubActivity {
                         actor: comment.author?.login,
                         body: comment.bodyText,
                         date: date,
-                        url: comment.url
+                        url: comment.url,
+                        canSquashMerge: false
                     ))
                 }
             }
@@ -413,6 +463,7 @@ private struct ActivityOwnerResult: Sendable {
     @Published var message: String?
     @Published var needsConnection = false
     @Published var loading = false
+    @Published private(set) var merging = Set<String>()
     private let api = GitHubActivity()
 
     var owners: [String] {
@@ -421,6 +472,22 @@ private struct ActivityOwnerResult: Sendable {
 
     func items(for owner: String) -> [ActivityItem] {
         itemsByOwner[owner] ?? []
+    }
+
+    func squashMerge(_ item: ActivityItem) async {
+        guard item.canSquashMerge, !merging.contains(item.id) else { return }
+        merging.insert(item.id)
+        defer { merging.remove(item.id) }
+        do {
+            try await api.squashMerge(item)
+            itemsByOwner[item.owner] = try await api.fetch(owner: item.owner, force: true)
+            message = nil
+            needsConnection = false
+        } catch {
+            message = error.localizedDescription
+            let failure = error as? ActivityFailure
+            needsConnection = failure == .missingCLI || failure == .signIn
+        }
     }
 
     func refresh(owners: [String], force: Bool = false) async {
@@ -497,47 +564,79 @@ private struct ActivityOwnerResult: Sendable {
 
 struct ActivityRow: View {
     let item: ActivityItem
+    let merging: Bool
+    let squashMerge: () -> Void
     @State private var hovered = false
+    @State private var mergeHovered = false
 
     var body: some View {
-        Button { NSWorkspace.shared.open(item.url) } label: {
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: item.kind.symbol)
-                    .font(.system(size: 12))
-                    .padding(.top, 2)
-                    .foregroundStyle(Palette.muted)
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(item.title)
-                        .font(.system(size: 15, weight: .medium))
-                        .multilineTextAlignment(.leading)
-                    Text("\(item.repository) #\(item.number)")
+        HStack(alignment: .top, spacing: 8) {
+            Button { NSWorkspace.shared.open(item.url) } label: {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: item.kind.symbol)
                         .font(.system(size: 12))
+                        .padding(.top, 2)
                         .foregroundStyle(Palette.muted)
-                    HStack(spacing: 5) {
-                        Text(item.kind.label)
-                        if let actor = item.actor {
-                            Text("by " + actor)
-                        }
-                        Spacer(minLength: 4)
-                        Text(item.date, style: .relative)
-                    }
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.muted)
-                    if let preview = item.preview {
-                        Text(preview)
-                            .font(.system(size: 11))
-                            .foregroundStyle(Palette.muted)
-                            .lineLimit(2)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(item.title)
+                            .font(.system(size: 15, weight: .medium))
                             .multilineTextAlignment(.leading)
+                        Text("\(item.repository) #\(item.number)")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Palette.muted)
+                        HStack(spacing: 5) {
+                            Text(item.kind.label)
+                            if let actor = item.actor {
+                                Text("by " + actor)
+                            }
+                            Spacer(minLength: 4)
+                            Text(item.date, style: .relative)
+                        }
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.muted)
+                        if let preview = item.preview {
+                            Text(preview)
+                                .font(.system(size: 11))
+                                .foregroundStyle(Palette.muted)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(item.title)
+            .help("Open activity on GitHub")
+
+            if item.canSquashMerge {
+                Button(action: squashMerge) {
+                    HStack(spacing: 6) {
+                        if merging {
+                            ProgressView().controlSize(.mini)
+                        }
+                        Text(merging ? "Merging…" : "Squash and merge")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundStyle(Palette.text)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Palette.accent.opacity(mergeHovered ? 0.32 : 0.18))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Palette.accent.opacity(0.75), lineWidth: 1)
                     }
                 }
-                Spacer(minLength: 0)
+                .buttonStyle(.plain)
+                .disabled(merging)
+                .onHover { mergeHovered = $0 }
+                .help("Squash and merge pull request #\(item.number) into its base branch")
+                .accessibilityLabel("Squash and merge \(item.repository) pull request \(item.number)")
             }
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(item.title)
-        .help("Open activity on GitHub")
         .padding(12)
         .background(hovered ? Color.white.opacity(0.07) : Color.clear)
         .onHover { hovered = $0 }
