@@ -6,23 +6,43 @@ struct Repository: Identifiable, Codable, Sendable {
     let owner: String
     let lastActivityAt: Date?
     let cloneURL: URL?
+    let githubName: String?
+    let gitCommonDirectory: URL?
 
-    init(url: URL, owner: String, lastActivityAt: Date?, cloneURL: URL? = nil) {
+    init(url: URL, owner: String, lastActivityAt: Date?, cloneURL: URL? = nil,
+         githubName: String? = nil, gitCommonDirectory: URL? = nil) {
         self.url = url
         self.owner = owner
         self.lastActivityAt = lastActivityAt
         self.cloneURL = cloneURL
+        self.githubName = githubName
+        self.gitCommonDirectory = gitCommonDirectory
     }
 
-    var id: String { url.path }
+    var id: String { url.standardizedFileURL.path }
     var name: String { url.lastPathComponent }
-    var fullName: String { owner + "/" + name }
+    var repositoryName: String { githubName ?? name }
+    var fullName: String { owner + "/" + repositoryName }
     var usageKey: String { fullName.lowercased() }
     var isLocal: Bool { cloneURL == nil }
+    var githubURL: URL? {
+        guard owner != "Local" else { return nil }
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "github.com"
+        components.path = "/\(owner)/\(repositoryName)"
+        return components.url
+    }
+    var isWorktree: Bool { isLocal && gitCommonDirectory != nil }
+    var displayName: String { isWorktree ? repositoryName : name }
+    var worktreeDetail: String? {
+        guard isWorktree else { return nil }
+        return name.caseInsensitiveCompare(repositoryName) == .orderedSame ? "Worktree" : "Worktree · " + name
+    }
 }
 
 enum Discovery {
-    static func githubOwner(from remote: String) -> String? {
+    static func githubRepository(from remote: String) -> (owner: String, name: String)? {
         let value = remote.trimmingCharacters(in: .whitespacesAndNewlines)
         let path: String
         if value.hasPrefix("git@github.com:") {
@@ -32,23 +52,34 @@ enum Discovery {
             path = url.path
         } else { return nil }
         let parts = path.split(separator: "/")
-        guard parts.count == 2,
-              String(parts[0]).range(of: "^[A-Za-z0-9-]+$", options: .regularExpression) != nil else { return nil }
-        return String(parts[0])
+        guard parts.count == 2 else { return nil }
+        let owner = String(parts[0])
+        var name = String(parts[1])
+        if name.hasSuffix(".git") { name.removeLast(4) }
+        guard owner.range(of: "^[A-Za-z0-9-]+$", options: .regularExpression) != nil,
+              !name.isEmpty,
+              name.range(of: "^[A-Za-z0-9._-]+$", options: .regularExpression) != nil else { return nil }
+        return (owner, name)
     }
 
-    private static func owner(of repository: URL, fallback: String) -> String {
+    static func githubOwner(from remote: String) -> String? {
+        githubRepository(from: remote)?.owner
+    }
+
+    private static func origin(of repository: URL, fallback: String) -> (owner: String, githubName: String?) {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         task.arguments = ["-C", repository.path, "config", "--get", "remote.origin.url"]
         let output = Pipe()
         task.standardOutput = output
         task.standardError = FileHandle.nullDevice
-        do { try task.run() } catch { return fallback }
+        do { try task.run() } catch { return (fallback, nil) }
         let data = output.fileHandleForReading.readDataToEndOfFile()
         task.waitUntilExit()
-        guard task.terminationStatus == 0, let remote = String(data: data, encoding: .utf8) else { return fallback }
-        return githubOwner(from: remote) ?? fallback
+        guard task.terminationStatus == 0,
+              let remote = String(data: data, encoding: .utf8),
+              let github = githubRepository(from: remote) else { return (fallback, nil) }
+        return (github.owner, github.name)
     }
 
     private static func lastCommitDate(of repository: URL) -> Date? {
@@ -68,6 +99,83 @@ enum Discovery {
         return Date(timeIntervalSince1970: seconds)
     }
 
+    private static func linkedWorktreeCommonDirectory(of repository: URL) -> URL? {
+        let dotGit = repository.appendingPathComponent(".git")
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: dotGit.path, isDirectory: &isDirectory),
+              !isDirectory.boolValue else { return nil }
+
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        task.arguments = ["-C", repository.path, "rev-parse", "--git-common-dir"]
+        let output = Pipe()
+        task.standardOutput = output
+        task.standardError = FileHandle.nullDevice
+        do { try task.run() } catch { return nil }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        task.waitUntilExit()
+        guard task.terminationStatus == 0,
+              let value = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else { return nil }
+        let common = URL(fileURLWithPath: value, relativeTo: repository)
+            .standardizedFileURL
+        return common
+    }
+
+    private static func localRepository(at repository: URL, fallbackOwner: String) -> Repository {
+        let origin = self.origin(of: repository, fallback: fallbackOwner)
+        return Repository(
+            url: repository.standardizedFileURL,
+            owner: origin.owner,
+            lastActivityAt: lastCommitDate(of: repository),
+            githubName: origin.githubName,
+            gitCommonDirectory: linkedWorktreeCommonDirectory(of: repository)
+        )
+    }
+
+    static func deduplicatedLocal(_ repositories: [Repository], root: URL) -> [Repository] {
+        var seenPaths = Set<String>()
+        var primaryByRepository = [String: Repository]()
+        var worktrees: [Repository] = []
+
+        func expectedPath(for repository: Repository) -> String {
+            root.appendingPathComponent(repository.owner, isDirectory: true)
+                .appendingPathComponent(repository.repositoryName, isDirectory: true)
+                .standardizedFileURL.path
+        }
+
+        func preferred(_ candidate: Repository, over current: Repository) -> Bool {
+            let candidateExpected = candidate.url.standardizedFileURL.path == expectedPath(for: candidate)
+            let currentExpected = current.url.standardizedFileURL.path == expectedPath(for: current)
+            if candidateExpected != currentExpected { return candidateExpected }
+            return candidate.url.path.localizedStandardCompare(current.url.path) == .orderedAscending
+        }
+
+        for repository in repositories {
+            let path = repository.url.resolvingSymlinksInPath().standardizedFileURL.path
+            guard seenPaths.insert(path).inserted else { continue }
+            if repository.isWorktree {
+                worktrees.append(repository)
+                continue
+            }
+            if let current = primaryByRepository[repository.usageKey] {
+                if preferred(repository, over: current) {
+                    primaryByRepository[repository.usageKey] = repository
+                }
+            } else {
+                primaryByRepository[repository.usageKey] = repository
+            }
+        }
+
+        let primary = primaryByRepository.values.sorted {
+            $0.url.path.localizedStandardCompare($1.url.path) == .orderedAscending
+        }
+        return primary + worktrees.sorted {
+            $0.url.path.localizedStandardCompare($1.url.path) == .orderedAscending
+        }
+    }
+
     static func scan(_ root: URL) throws -> [Repository] {
         let fm = FileManager.default
         func directories(_ url: URL) throws -> [URL] {
@@ -77,18 +185,14 @@ enum Discovery {
         var repos: [Repository] = []
         for owner in try directories(root) {
             if fm.fileExists(atPath: owner.appendingPathComponent(".git").path) {
-                let repositoryOwner = self.owner(of: owner, fallback: "Local")
-                repos.append(Repository(url: owner, owner: repositoryOwner,
-                                        lastActivityAt: lastCommitDate(of: owner)))
+                repos.append(localRepository(at: owner, fallbackOwner: "Local"))
             } else {
                 for repo in try directories(owner) where fm.fileExists(atPath: repo.appendingPathComponent(".git").path) {
-                    let repositoryOwner = self.owner(of: repo, fallback: owner.lastPathComponent)
-                    repos.append(Repository(url: repo, owner: repositoryOwner,
-                                            lastActivityAt: lastCommitDate(of: repo)))
+                    repos.append(localRepository(at: repo, fallbackOwner: owner.lastPathComponent))
                 }
             }
         }
-        return repos
+        return deduplicatedLocal(repos, root: root)
     }
 
     static func merged(local: [Repository], remote: [Repository]) -> [Repository] {
@@ -286,8 +390,8 @@ enum RepositoryRanking {
     static func ranked(_ repositories: [Repository], usage: [String: RepositoryUsage],
                        pinned: Set<String> = []) -> [Repository] {
         repositories.sorted { first, second in
-            let firstPinned = pinned.contains(first.usageKey)
-            let secondPinned = pinned.contains(second.usageKey)
+            let firstPinned = !first.isWorktree && pinned.contains(first.usageKey)
+            let secondPinned = !second.isWorktree && pinned.contains(second.usageKey)
             if firstPinned != secondPinned { return firstPinned }
             if first.isLocal != second.isLocal { return first.isLocal }
 
@@ -500,7 +604,7 @@ actor GitHubRepositoryCatalog {
             let destination = root.appendingPathComponent(owner, isDirectory: true)
                 .appendingPathComponent(name, isDirectory: true)
             return Repository(url: destination, owner: owner, lastActivityAt: activity,
-                              cloneURL: repository.clone_url)
+                              cloneURL: repository.clone_url, githubName: name)
         }
     }
 }
@@ -609,21 +713,29 @@ enum OwnerOrdering {
     }
 
     func ranked(_ repositories: [Repository]) -> [Repository] {
-        let localPins = repositories.filter { $0.isLocal && columnPins.contains($0.usageKey) }
-        let otherRepositories = repositories.filter { !($0.isLocal && columnPins.contains($0.usageKey)) }
+        let localPins = repositories.filter { $0.isLocal && !$0.isWorktree && columnPins.contains($0.usageKey) }
+        let otherRepositories = repositories.filter { !($0.isLocal && !$0.isWorktree && columnPins.contains($0.usageKey)) }
         return PinnedRepositoryOrdering.ordered(localPins, keys: pinnedOrder)
             + RepositoryRanking.ranked(otherRepositories, usage: usage, pinned: pinned)
     }
 
-    func isColumnPinned(_ repository: Repository) -> Bool { columnPins.contains(repository.usageKey) }
+    func isColumnPinned(_ repository: Repository) -> Bool {
+        !repository.isWorktree && columnPins.contains(repository.usageKey)
+    }
 
-    func isPinned(_ repository: Repository) -> Bool { pinned.contains(repository.usageKey) }
+    func isPinned(_ repository: Repository) -> Bool {
+        !repository.isWorktree && pinned.contains(repository.usageKey)
+    }
 
     func pinnedRepositories(from repositories: [Repository]) -> [Repository] {
-        PinnedRepositoryOrdering.ordered(repositories.filter { $0.isLocal && !columnPins.contains($0.usageKey) }, keys: pinnedOrder)
+        PinnedRepositoryOrdering.ordered(
+            repositories.filter { $0.isLocal && !$0.isWorktree && !columnPins.contains($0.usageKey) },
+            keys: pinnedOrder
+        )
     }
 
     func togglePin(_ repository: Repository) {
+        guard !repository.isWorktree else { return }
         if let index = pinnedOrder.firstIndex(of: repository.usageKey) {
             pinnedOrder.remove(at: index)
             columnPins.remove(repository.usageKey)
@@ -636,7 +748,7 @@ enum OwnerOrdering {
     }
 
     func placeInColumn(_ repository: Repository) {
-        guard repository.isLocal, isPinned(repository) else { return }
+        guard repository.isLocal, !repository.isWorktree, isPinned(repository) else { return }
         columnPins.insert(repository.usageKey)
         defaults.set(columnPins.sorted(), forKey: Self.columnPinKey)
     }
@@ -666,6 +778,7 @@ enum OwnerOrdering {
     @Published var githubMessage: String?
     @Published private(set) var refreshing = false
     @Published private(set) var cloning = Set<String>()
+    @Published private(set) var removingWorktrees = Set<String>()
     private let root = URL(fileURLWithPath: NSHomeDirectory() + "/GitHub")
     private let remoteCatalog = GitHubRepositoryCatalog()
     private let cache = RepositoryCache()
@@ -786,8 +899,44 @@ enum OwnerOrdering {
         }
     }
 
+    func removeWorktree(_ repo: Repository) async {
+        guard repo.isWorktree, let commonDirectory = repo.gitCommonDirectory else { return }
+        let key = repo.id
+        var next = removingWorktrees
+        guard next.insert(key).inserted else { return }
+        removingWorktrees = next
+        defer { removingWorktrees = removingWorktrees.subtracting([key]) }
+
+        let path = repo.url.standardizedFileURL.path
+        do {
+            let result = try await Task.detached { () -> (Int32, String) in
+                let process = Process()
+                let output = Pipe()
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+                process.arguments = ["--git-dir", commonDirectory.path, "worktree", "remove", path]
+                process.standardOutput = FileHandle.nullDevice
+                process.standardError = output
+                process.standardInput = FileHandle.nullDevice
+                try process.run()
+                let data = output.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
+                return (process.terminationStatus, String(decoding: data, as: UTF8.self)
+                    .trimmingCharacters(in: .whitespacesAndNewlines))
+            }.value
+            guard result.0 == 0 else {
+                error = result.1.isEmpty
+                    ? "Couldn’t remove \(repo.name). Git may be protecting uncommitted work."
+                    : "Couldn’t remove \(repo.name): \(result.1)"
+                return
+            }
+            await refresh(priorityOwners: owners)
+        } catch {
+            self.error = "Couldn’t remove \(repo.name): \(error.localizedDescription)"
+        }
+    }
+
     func open(_ repo: Repository) {
-        openInVSCode(repo.url, displayName: repo.name)
+        openInVSCode(repo.url, displayName: repo.displayName)
     }
 
     func openFolder(_ url: URL) {
@@ -881,18 +1030,83 @@ enum Palette {
     }
 }
 
+struct SecondaryClickRegion: NSViewRepresentable {
+    let action: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(action: action) }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        context.coordinator.view = view
+        context.coordinator.start()
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.action = action
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.stop()
+    }
+
+    final class Coordinator {
+        weak var view: NSView?
+        var action: () -> Void
+        private var monitor: Any?
+
+        init(action: @escaping () -> Void) {
+            self.action = action
+        }
+
+        func start() {
+            stop()
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .rightMouseDown) { [weak self] event in
+                guard let self,
+                      let view,
+                      view.window === event.window,
+                      view.bounds.contains(view.convert(event.locationInWindow, from: nil)) else { return event }
+                action()
+                return nil
+            }
+        }
+
+        func stop() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
+
+        deinit { stop() }
+    }
+}
+
 struct RepositoryRow: View {
     let repo: Repository
     let pinned: Bool
     let cloning: Bool
+    let removing: Bool
     let togglePin: () -> Void
     let open: () -> Void
     let clone: () -> Void
+    let removeWorktree: () -> Void
     var dragKey: String? = nil
     @State private var hovered = false
+    @State private var confirmingWorktreeRemoval = false
 
     var body: some View {
-        if let dragKey { row.draggable(dragKey) } else { row }
+        Group {
+            if let dragKey { row.draggable(dragKey) } else { row }
+        }
+        .confirmationDialog(
+            "Remove worktree?",
+            isPresented: $confirmingWorktreeRemoval,
+            titleVisibility: .visible
+        ) {
+            Button("Remove Worktree", role: .destructive, action: removeWorktree)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Mobli will ask Git to remove this linked worktree. Git will refuse if it contains changes that would be lost.")
+        }
     }
 
     private var row: some View {
@@ -900,8 +1114,16 @@ struct RepositoryRow: View {
             if repo.isLocal {
                 Button(action: open) {
                     HStack(spacing: 8) {
-                        Text(repo.name).font(.system(size: 15, weight: .medium)).lineLimit(2)
-                            .multilineTextAlignment(.leading)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(repo.displayName).font(.system(size: 15, weight: .medium)).lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                                .background(SecondaryClickRegion {
+                                    if let url = repo.githubURL { NSWorkspace.shared.open(url) }
+                                })
+                            if let detail = repo.worktreeDetail {
+                                Text(detail).font(.system(size: 11)).foregroundStyle(Palette.muted).lineLimit(1)
+                            }
+                        }
                         Spacer(minLength: 0)
                         if hovered { Image(systemName: "arrow.up.right").font(.system(size: 10)) }
                     }
@@ -912,9 +1134,9 @@ struct RepositoryRow: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(repo.name)
+                .accessibilityLabel(repo.displayName)
                 .onHover { hovered = $0 }
-                .help("Open \(repo.name) in a new VS Code window")
+                .help("Open \(repo.displayName) in a new VS Code window")
             } else {
                 HStack(spacing: 8) {
                     Image(systemName: "cloud")
@@ -922,6 +1144,9 @@ struct RepositoryRow: View {
                         .foregroundStyle(Palette.muted)
                     Text(repo.name).font(.system(size: 15, weight: .medium)).lineLimit(2)
                         .multilineTextAlignment(.leading)
+                        .background(SecondaryClickRegion {
+                            if let url = repo.githubURL { NSWorkspace.shared.open(url) }
+                        })
                     Spacer(minLength: 0)
                 }
                 .foregroundStyle(Palette.text)
@@ -930,7 +1155,24 @@ struct RepositoryRow: View {
                 .help("Available on GitHub; not cloned locally")
             }
 
-            if repo.isLocal {
+            if repo.isWorktree {
+                Button {
+                    confirmingWorktreeRemoval = true
+                } label: {
+                    if removing {
+                        ProgressView().controlSize(.small).padding(8)
+                    } else {
+                        Image(systemName: "trash")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Palette.muted)
+                            .padding(10)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(removing)
+                .help("Remove this linked Git worktree")
+                .accessibilityLabel("Remove worktree \(repo.name)")
+            } else if repo.isLocal {
                 Button(action: togglePin) {
                     Image(systemName: pinned ? "pin.fill" : "pin")
                         .font(.system(size: 12))
@@ -958,7 +1200,10 @@ struct RepositoryRow: View {
             }
         }
         .contextMenu {
-            if repo.isLocal {
+            if repo.isWorktree {
+                Button("Remove worktree", role: .destructive) { confirmingWorktreeRemoval = true }
+                    .disabled(removing)
+            } else if repo.isLocal {
                 Button(pinned ? "Unpin repository" : "Pin repository", action: togglePin)
             } else {
                 Button("Clone repository", action: clone).disabled(cloning)
@@ -993,6 +1238,9 @@ struct PinnedRepositoryItem: View {
                     }
                     VStack(alignment: .leading, spacing: 3) {
                         Text(repo.name).font(.system(size: 16, weight: .semibold)).lineLimit(1)
+                            .background(SecondaryClickRegion {
+                                if let url = repo.githubURL { NSWorkspace.shared.open(url) }
+                            })
                         Text(repo.owner).font(.system(size: 12)).foregroundStyle(Palette.muted).lineLimit(1)
                     }
                     Spacer(minLength: 0)
@@ -1560,7 +1808,7 @@ struct LauncherView: View {
                                 } else {
                                     let ownerRepositories = library.repositories(for: owner)
                                     let repositories = repoUsage.ranked(ownerRepositories.filter {
-                                        !repoUsage.isPinned($0) || repoUsage.isColumnPinned($0) || !$0.isLocal
+                                        $0.isWorktree || !repoUsage.isPinned($0) || repoUsage.isColumnPinned($0) || !$0.isLocal
                                     })
                                     OwnerHeader(owner: owner, profile: library.profiles[owner], subtitle: showRepositoryCounts ? "\(ownerRepositories.count) repos" : nil, showOwnerSlugs: showOwnerSlugs)
                                         .draggable(owner).help("Drag to reorder organizations")
@@ -1578,12 +1826,14 @@ struct LauncherView: View {
                                                     repo: repo,
                                                     pinned: repoUsage.isPinned(repo),
                                                     cloning: library.cloning.contains(repo.usageKey),
+                                                    removing: library.removingWorktrees.contains(repo.id),
                                                     togglePin: { repoUsage.togglePin(repo) },
                                                     open: {
                                                         repoUsage.record(repo)
                                                         library.open(repo)
                                                     },
                                                     clone: { Task { await library.clone(repo) } },
+                                                    removeWorktree: { Task { await library.removeWorktree(repo) } },
                                                     dragKey: repoUsage.isColumnPinned(repo) ? repo.usageKey : nil
                                                 )
                                                 .dropDestination(for: String.self) { items, location in
