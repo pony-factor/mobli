@@ -436,6 +436,7 @@ enum PinnedRepositoryOrdering {
 struct OwnerProfile: Codable, Sendable {
     let displayName: String
     let avatar: Data
+    let isOrganization: Bool?
     let fetchedAt: Date
 
     var isFresh: Bool { Date().timeIntervalSince(fetchedAt) < 7 * 24 * 60 * 60 }
@@ -480,7 +481,7 @@ actor OwnerCache {
 
     func profile(_ owner: String, force: Bool = false) async -> OwnerProfile? {
         let old = cached(owner)
-        if !force, let old, old.isFresh { return old }
+        if !force, let old, old.isFresh, old.isOrganization != nil { return old }
         guard owner != "Local", owner.range(of: "^[A-Za-z0-9-]+$", options: .regularExpression) != nil else { return old }
         do {
             // Organization profiles expose the organization display name.
@@ -488,15 +489,21 @@ actor OwnerCache {
             let orgURL = URL(string: "https://api.github.com/orgs/" + owner)!
             let userURL = URL(string: "https://api.github.com/users/" + owner)!
             let data: Data
-            do { data = try await download(orgURL, isAPI: true) }
-            catch { data = try await download(userURL, isAPI: true) }
+            let isOrganization: Bool
+            do {
+                data = try await download(orgURL, isAPI: true)
+                isOrganization = true
+            } catch {
+                data = try await download(userURL, isAPI: true)
+                isOrganization = false
+            }
             let info = try JSONDecoder().decode(GitHubOwner.self, from: data)
             guard info.avatar_url.scheme == "https" else { return old }
             let avatar = try await download(info.avatar_url)
             guard NSImage(data: avatar) != nil else { return old }
             let name = info.name?.trimmingCharacters(in: .whitespacesAndNewlines)
             let profile = OwnerProfile(displayName: name.flatMap { $0.isEmpty ? nil : $0 } ?? owner,
-                                       avatar: avatar, fetchedAt: Date())
+                                       avatar: avatar, isOrganization: isOrganization, fetchedAt: Date())
             try FileManager.default.createDirectory(at: Self.directory, withIntermediateDirectories: true)
             try JSONEncoder().encode(profile).write(to: Self.cacheURL(owner), options: .atomic)
             return profile
@@ -1279,6 +1286,12 @@ struct OwnerHeader: View {
     let profile: OwnerProfile?
     let subtitle: String?
     let showOwnerSlugs: Bool
+    var titleOverride: String? = nil
+
+    private var displayTitle: String {
+        titleOverride ?? profile?.displayName ?? owner
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             if let data = profile?.avatar, let image = NSImage(data: data) {
@@ -1290,8 +1303,8 @@ struct OwnerHeader: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             VStack(alignment: .leading, spacing: 3) {
-                Text(profile?.displayName ?? owner).font(.system(size: 16, weight: .semibold)).lineLimit(2)
-                if showOwnerSlugs, let profile, profile.displayName != owner {
+                Text(displayTitle).font(.system(size: 16, weight: .semibold)).lineLimit(2)
+                if showOwnerSlugs, displayTitle != owner {
                     Text(owner).font(.system(size: 12)).foregroundStyle(Palette.muted)
                 }
                 if let subtitle {
@@ -1672,6 +1685,7 @@ struct LauncherView: View {
     @State private var pinnedDragMouseUpMonitor: Any?
     @AppStorage("studio.repository-launcher.show-repository-counts") private var showRepositoryCounts = true
     @AppStorage("studio.repository-launcher.show-owner-slugs") private var showOwnerSlugs = true
+    @AppStorage("studio.repository-launcher.personal-column-title") private var personalColumnTitle = "Personal Repos"
     @AppStorage(Palette.backgroundKey) private var themeBackground = Palette.defaultBackground
     @AppStorage(Palette.columnKey) private var themeColumn = Palette.defaultColumn
     @AppStorage(Palette.columnInteriorKey) private var themeColumnInterior = Palette.defaultColumnInterior
@@ -1692,6 +1706,10 @@ struct LauncherView: View {
     private var owners: [String] { ownerOrder.ordered(availableOwners) }
     private var pinnedRepositories: [Repository] {
         repoUsage.pinnedRepositories(from: library.repos)
+    }
+    private var personalColumnHeading: String? {
+        let title = personalColumnTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? nil : title
     }
     var body: some View {
         VStack(spacing: 0) {
@@ -1844,7 +1862,14 @@ struct LauncherView: View {
                                     let repositories = repoUsage.ranked(ownerRepositories.filter {
                                         $0.isWorktree || !repoUsage.isPinned($0) || repoUsage.isColumnPinned($0) || !$0.isLocal
                                     })
-                                    OwnerHeader(owner: owner, profile: library.profiles[owner], subtitle: showRepositoryCounts ? "\(ownerRepositories.count) repos" : nil, showOwnerSlugs: showOwnerSlugs)
+                                    let profile = library.profiles[owner]
+                                    OwnerHeader(
+                                        owner: owner,
+                                        profile: profile,
+                                        subtitle: showRepositoryCounts ? "\(ownerRepositories.count) repos" : nil,
+                                        showOwnerSlugs: showOwnerSlugs,
+                                        titleOverride: profile?.isOrganization == false ? personalColumnHeading : nil
+                                    )
                                         .draggable(owner).help("Drag to reorder organizations")
                                         .contextMenu {
                                             if ownerOrder.isManual(owner) {
@@ -2117,6 +2142,14 @@ struct LauncherView: View {
                 Text("Repository display").font(.system(size: 15, weight: .semibold))
                 Toggle("Show repository counts in each category", isOn: $showRepositoryCounts)
                 Toggle("Show GitHub owner slugs beneath display names", isOn: $showOwnerSlugs)
+                Divider().overlay(Color.white.opacity(0.08))
+                Text("Personal repository column title")
+                    .font(.system(size: 13, weight: .semibold))
+                TextField("Personal Repos", text: $personalColumnTitle)
+                    .textFieldStyle(.roundedBorder)
+                Text("Personal GitHub-account columns use this heading. Leave it blank to use the account’s GitHub display name.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.muted)
             }
             settingsBlock {
                 Text("Pinned repositories").font(.system(size: 15, weight: .semibold))
