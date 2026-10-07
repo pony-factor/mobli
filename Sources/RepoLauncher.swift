@@ -153,6 +153,14 @@ enum FolderSearchFailure: LocalizedError {
 }
 
 enum FolderSearch {
+    static var defaultFallbackRoots: [URL] {
+        let home = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+        return [
+            home.appendingPathComponent("GitHub", isDirectory: true),
+            home.appendingPathComponent("Desktop", isDirectory: true),
+        ]
+    }
+
     static func matchesName(_ name: String, query: String) -> Bool {
         name.localizedStandardContains(query)
     }
@@ -209,10 +217,7 @@ enum FolderSearch {
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         let predicate = "kMDItemContentType == 'public.folder' && kMDItemFSName == \"*\(escaped)*\"cd"
-        let roots = fallbackRoots ?? [
-            URL(fileURLWithPath: NSHomeDirectory())
-                .appendingPathComponent("GitHub", isDirectory: true)
-        ]
+        let roots = fallbackRoots ?? defaultFallbackRoots
 
         return try await Task.detached {
             let process = Process()
@@ -1445,25 +1450,27 @@ struct LauncherView: View {
                     .help("Settings")
                 }
                 .frame(height: 32)
-                FolderSearchBar(query: $folderQuery, results: folderResults,
-                                searching: folderSearching, message: folderSearchMessage,
-                                cloning: library.cloning,
-                                clone: { repo in Task { await library.clone(repo) } }) { result in
-                    folderResults = []
-                    folderSearchMessage = nil
-                    if let githubURL = result.githubURL {
-                        NSWorkspace.shared.open(githubURL)
-                        return
+                if !settings {
+                    FolderSearchBar(query: $folderQuery, results: folderResults,
+                                    searching: folderSearching, message: folderSearchMessage,
+                                    cloning: library.cloning,
+                                    clone: { repo in Task { await library.clone(repo) } }) { result in
+                        folderResults = []
+                        folderSearchMessage = nil
+                        if let githubURL = result.githubURL {
+                            NSWorkspace.shared.open(githubURL)
+                            return
+                        }
+                        if let repo = library.repos.first(where: {
+                            $0.isLocal && $0.url.standardizedFileURL.path == result.url.standardizedFileURL.path
+                        }) {
+                            repoUsage.record(repo)
+                        }
+                        library.openFolder(result.url)
                     }
-                    if let repo = library.repos.first(where: {
-                        $0.isLocal && $0.url.standardizedFileURL.path == result.url.standardizedFileURL.path
-                    }) {
-                        repoUsage.record(repo)
-                    }
-                    library.openFolder(result.url)
+                    .frame(width: 220)
+                    .offset(y: 36)
                 }
-                .frame(width: 220)
-                .offset(y: 36)
             }
             .frame(height: !notifications && !activity && !settings && !showingAgenda && !pinnedRepositories.isEmpty ? 32 : 76, alignment: .topLeading)
             .zIndex(50)
