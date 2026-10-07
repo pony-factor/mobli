@@ -22,12 +22,15 @@ cat > "$destination/Contents/Info.plist" <<'PLIST'
 PLIST
 fingerprint=$(/bin/zsh "$source_dir/scripts/source-fingerprint.sh" "$source_dir")
 revision=$(/usr/bin/git -C "$source_dir" rev-parse HEAD 2>/dev/null || true)
-source_clean=true
-if ! /usr/bin/git -C "$source_dir" diff --quiet HEAD -- Sources AppIcon.icns build-app.sh scripts; then
-  source_clean=false
-fi
-if [[ -n "$(/usr/bin/git -C "$source_dir" ls-files --others --exclude-standard -- Sources scripts)" ]]; then
-  source_clean=false
+source_clean=false
+if /usr/bin/git -C "$source_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  source_clean=true
+  if ! /usr/bin/git -C "$source_dir" diff --quiet HEAD -- Sources AppIcon.icns build-app.sh scripts; then
+    source_clean=false
+  fi
+  if [[ -n "$(/usr/bin/git -C "$source_dir" ls-files --others --exclude-standard -- Sources scripts)" ]]; then
+    source_clean=false
+  fi
 fi
 plist="$destination/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :LauncherSourceFingerprint string $fingerprint" "$plist"

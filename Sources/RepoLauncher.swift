@@ -2203,7 +2203,7 @@ struct LauncherView: View {
             FileManager.default.createFile(atPath: log.path, contents: nil)
         }
         let output = try? FileHandle(forWritingTo: log)
-        try? output?.seekToEnd()
+        _ = try? output?.seekToEnd()
         task.standardOutput = output ?? FileHandle.nullDevice
         task.standardError = output ?? FileHandle.nullDevice
         task.standardInput = FileHandle.nullDevice
@@ -2237,7 +2237,7 @@ struct LauncherView: View {
     }
 }
 
-final class LauncherAppDelegate: NSObject, NSApplicationDelegate {
+@MainActor final class LauncherAppDelegate: NSObject, NSApplicationDelegate {
     private let updater = LauncherAutoUpdater()
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),

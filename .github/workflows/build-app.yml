@@ -47,6 +47,7 @@ jobs:
         run: |
           set -eu
           app_path="$RUNNER_TEMP/Repository Launcher.app"
+          zsh tests/UpdateChecks.sh "$app_path"
           plutil -lint "$app_path/Contents/Info.plist"
           codesign --verify --deep --strict "$app_path"
           lipo "$app_path/Contents/MacOS/RepositoryLauncher" -verify_arch "${{ matrix.arch }}"
