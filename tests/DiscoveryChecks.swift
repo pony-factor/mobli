@@ -136,6 +136,9 @@ import Foundation
             $0.url.standardizedFileURL.path == suffixFolder.standardizedFileURL.path
         })
         precondition(FolderSearch.matchesName(suffixFolderName, query: suffixQuery))
+        let fallbackNames = Set(FolderSearch.defaultFallbackRoots.map(\.lastPathComponent))
+        precondition(fallbackNames.contains("GitHub"))
+        precondition(fallbackNames.contains("Desktop"))
 
         let cacheDirectory = root.appendingPathComponent("launcher-cache")
         let cache = RepositoryCache(directory: cacheDirectory)
