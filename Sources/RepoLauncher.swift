@@ -153,7 +153,55 @@ enum FolderSearchFailure: LocalizedError {
 }
 
 enum FolderSearch {
-    static func search(_ rawQuery: String, repositories: [Repository] = [], limit: Int = 64) async throws -> [FolderSearchResult] {
+    static func matchesName(_ name: String, query: String) -> Bool {
+        name.localizedStandardContains(query)
+    }
+
+    private static func fallbackMatches(_ query: String, roots: [URL], limit: Int) -> [FolderSearchResult] {
+        guard limit > 0 else { return [] }
+        let fileManager = FileManager.default
+        let resourceKeys: Set<URLResourceKey> = [.isDirectoryKey, .isSymbolicLinkKey]
+        var seen = Set<String>()
+        var results: [FolderSearchResult] = []
+
+        func append(_ url: URL) -> Bool {
+            let standardized = url.standardizedFileURL
+            guard matchesName(standardized.lastPathComponent, query: query),
+                  seen.insert(standardized.path).inserted else { return false }
+            results.append(FolderSearchResult(url: standardized))
+            return results.count >= limit
+        }
+
+        for rawRoot in roots {
+            guard !Task.isCancelled else { break }
+            let root = rawRoot.standardizedFileURL
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: root.path, isDirectory: &isDirectory),
+                  isDirectory.boolValue else { continue }
+
+            if append(root) { break }
+            guard let enumerator = fileManager.enumerator(
+                at: root,
+                includingPropertiesForKeys: Array(resourceKeys),
+                options: [.skipsHiddenFiles, .skipsPackageDescendants],
+                errorHandler: { _, _ in true }
+            ) else { continue }
+
+            for case let url as URL in enumerator {
+                guard !Task.isCancelled else { return results }
+                guard let values = try? url.resourceValues(forKeys: resourceKeys),
+                      values.isDirectory == true else { continue }
+                if values.isSymbolicLink == true {
+                    enumerator.skipDescendants()
+                }
+                if append(url) { return results }
+            }
+        }
+        return results
+    }
+
+    static func search(_ rawQuery: String, repositories: [Repository] = [], limit: Int = 64,
+                       fallbackRoots: [URL]? = nil) async throws -> [FolderSearchResult] {
         let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty, limit > 0 else { return [] }
 
@@ -161,6 +209,10 @@ enum FolderSearch {
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         let predicate = "kMDItemContentType == 'public.folder' && kMDItemFSName == \"*\(escaped)*\"cd"
+        let roots = fallbackRoots ?? [
+            URL(fileURLWithPath: NSHomeDirectory())
+                .appendingPathComponent("GitHub", isDirectory: true)
+        ]
 
         return try await Task.detached {
             let process = Process()
@@ -173,25 +225,38 @@ enum FolderSearch {
             try process.run()
             let data = output.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
+
             let matchingRepositories = repositories.filter {
                 $0.fullName.localizedStandardContains(query)
                     && (!$0.isLocal || FileManager.default.fileExists(atPath: $0.url.path))
             }.map { FolderSearchResult(url: $0.url, repository: $0) }
-            guard process.terminationStatus == 0 else {
-                if !matchingRepositories.isEmpty { return Array(matchingRepositories.prefix(limit)) }
+            let localFallback = fallbackMatches(query, roots: roots, limit: limit)
+
+            if process.terminationStatus != 0 {
+                let fallback = matchingRepositories + localFallback
+                if !fallback.isEmpty {
+                    var seen = Set<String>()
+                    return Array(fallback.filter { seen.insert($0.id).inserted }.prefix(limit))
+                }
                 throw FolderSearchFailure.unavailable
             }
 
             let text = String(decoding: data, as: UTF8.self)
-            var seen = Set(matchingRepositories.map(\.id))
-            var results = matchingRepositories
+            var seen = Set<String>()
+            var results: [FolderSearchResult] = []
+            for result in matchingRepositories + localFallback {
+                guard seen.insert(result.id).inserted else { continue }
+                results.append(result)
+            }
             for line in text.split(whereSeparator: \.isNewline) {
                 let path = String(line)
-                guard seen.insert(path).inserted else { continue }
+                let url = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+                guard matchesName(url.lastPathComponent, query: query),
+                      seen.insert(url.path).inserted else { continue }
                 var isDirectory: ObjCBool = false
-                guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+                guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
                       isDirectory.boolValue else { continue }
-                results.append(FolderSearchResult(url: URL(fileURLWithPath: path, isDirectory: true)))
+                results.append(FolderSearchResult(url: url))
             }
             return Array(results.sorted { first, second in
                 if first.isRepository != second.isRepository { return first.isRepository }
