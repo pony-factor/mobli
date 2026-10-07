@@ -206,6 +206,7 @@ struct RepositorySnapshot: Codable, Sendable {
     let repositories: [Repository]
     let remoteRefreshedAt: Date?
     let remoteOwners: [String]
+    let githubOrganizations: [String]?
 }
 
 struct RepositoryCache {
@@ -538,6 +539,10 @@ actor GitHubRepositoryCatalog {
         let owner: Owner
     }
 
+    private struct RemoteOrganization: Decodable {
+        let login: String
+    }
+
     private let dateFormatter = ISO8601DateFormatter()
 
     private func request(_ endpoint: String) async throws -> [RemoteRepository] {
@@ -579,6 +584,50 @@ actor GitHubRepositoryCatalog {
             page += 1
         }
         return repositories
+    }
+
+    private func organizationPage(_ page: Int) async throws -> [RemoteOrganization] {
+        guard let executable = GitHubInbox.executable else { throw GitHubRepositoryFailure.unavailable }
+        let arguments = [
+            "api", "--hostname", "github.com",
+            "-H", "Accept: application/vnd.github+json",
+            "-H", "X-GitHub-Api-Version: 2022-11-28",
+            "/user/orgs?per_page=100&page=\(page)",
+        ]
+        let result = try await Task.detached { () -> (Data, Int32) in
+            let process = Process()
+            let output = Pipe()
+            process.executableURL = URL(fileURLWithPath: executable)
+            process.arguments = arguments
+            process.standardOutput = output
+            process.standardError = FileHandle.nullDevice
+            process.standardInput = FileHandle.nullDevice
+            try process.run()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            return (data, process.terminationStatus)
+        }.value
+        guard result.1 == 0 else { throw GitHubRepositoryFailure.request }
+        do {
+            return try JSONDecoder().decode([RemoteOrganization].self, from: result.0)
+        } catch {
+            throw GitHubRepositoryFailure.request
+        }
+    }
+
+    func organizations() async throws -> [String] {
+        var organizations: [String] = []
+        var seen = Set<String>()
+        var page = 1
+        while true {
+            let batch = try await organizationPage(page)
+            for organization in batch where seen.insert(organization.login.lowercased()).inserted {
+                organizations.append(organization.login)
+            }
+            if batch.count < 100 { break }
+            page += 1
+        }
+        return organizations.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
     func repositories(root: URL, priorityOwners: [String]) async throws -> [Repository] {
@@ -783,6 +832,7 @@ enum OwnerOrdering {
     @Published var profiles: [String: OwnerProfile] = [:]
     @Published var error: String?
     @Published var githubMessage: String?
+    @Published private(set) var githubOrganizations: [String] = []
     @Published private(set) var refreshing = false
     @Published private(set) var cloning = Set<String>()
     @Published private(set) var removingWorktrees = Set<String>()
@@ -797,19 +847,21 @@ enum OwnerOrdering {
             repos = snapshot.repositories
             remoteRefreshedAt = snapshot.remoteRefreshedAt
             remoteOwners = snapshot.remoteOwners
+            githubOrganizations = snapshot.githubOrganizations ?? []
         }
         loadCachedProfiles()
     }
 
     private func loadCachedProfiles(additionalOwners: [String] = []) {
-        for owner in Set(owners + additionalOwners) where profiles[owner] == nil {
+        for owner in Set(owners + githubOrganizations + additionalOwners) where profiles[owner] == nil {
             if let profile = OwnerCache.cachedProfile(owner) { profiles[owner] = profile }
         }
     }
 
     private func saveRepositories() {
         try? cache.save(RepositorySnapshot(root: root, repositories: repos,
-                                          remoteRefreshedAt: remoteRefreshedAt, remoteOwners: remoteOwners))
+                                          remoteRefreshedAt: remoteRefreshedAt, remoteOwners: remoteOwners,
+                                          githubOrganizations: githubOrganizations))
     }
     var owners: [String] {
         Array(Set(repos.map(\.owner))).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
@@ -837,10 +889,13 @@ enum OwnerOrdering {
             saveRepositories()
             let recentRemote = remoteRefreshedAt.map { Date().timeIntervalSince($0) < 5 * 60 } ?? false
             let requestedOwners = Set(priorityOwners.map { $0.lowercased() })
-            if forceProfiles || !recentRemote || !requestedOwners.isSubset(of: Set(remoteOwners)) {
+            if forceProfiles || githubOrganizations.isEmpty || !recentRemote || !requestedOwners.isSubset(of: Set(remoteOwners)) {
                 do {
                     let remote = try await remoteCatalog.repositories(root: scanRoot, priorityOwners: priorityOwners)
                     repos = Discovery.merged(local: local, remote: remote)
+                    if let organizations = try? await remoteCatalog.organizations() {
+                        githubOrganizations = organizations
+                    }
                     remoteRefreshedAt = Date()
                     remoteOwners = Array(requestedOwners)
                     loadCachedProfiles(additionalOwners: priorityOwners)
@@ -853,10 +908,11 @@ enum OwnerOrdering {
             error = nil
         }
         catch { self.error = "Couldn’t read \(root.path): \(error.localizedDescription)" }
-        profiles = profiles.filter { owners.contains($0.key) }
+        let profileOwners = Array(Set(owners + githubOrganizations + priorityOwners))
+        profiles = profiles.filter { profileOwners.contains($0.key) }
         loadCachedProfiles(additionalOwners: priorityOwners)
         await withTaskGroup(of: (String, OwnerProfile?).self) { group in
-            for owner in owners {
+            for owner in profileOwners {
                 group.addTask { (owner, await OwnerCache.shared.profile(owner, force: forceProfiles)) }
             }
             for await (owner, profile) in group {
@@ -2153,15 +2209,20 @@ struct LauncherView: View {
     }
 
     private var organizationSettings: some View {
-        let orderedOwners = ownerOrder.ordered(library.owners + ownerOrder.manualOwners + inbox.owners)
+        let orderedOwners = ownerOrder.ordered(
+            library.owners + library.githubOrganizations + ownerOrder.manualOwners + inbox.owners
+        )
         return settingsBlock {
             Text("Organization order").font(.system(size: 15, weight: .semibold))
-            Text("Drag organization headers on the Repositories, Activity, or Notifications page, or use the arrows below.")
+            Text("Drag rows here or organization headers on the Repositories, Activity, or Notifications page. The arrows remain available for precise moves.")
                 .font(.system(size: 12))
                 .foregroundStyle(Palette.muted)
             Divider().overlay(Color.white.opacity(0.08))
             ForEach(Array(orderedOwners.enumerated()), id: \.element) { index, owner in
                 HStack {
+                    Image(systemName: "line.3.horizontal")
+                        .foregroundStyle(Palette.muted)
+                        .help("Drag to reorder \(owner)")
                     Text(library.profiles[owner]?.displayName ?? inbox.profiles[owner]?.displayName ?? owner)
                     Spacer()
                     Button {
@@ -2176,6 +2237,19 @@ struct LauncherView: View {
                     .disabled(index == orderedOwners.count - 1)
                     .help("Move \(owner) later")
                     .accessibilityLabel("Move \(owner) later")
+                }
+                .contentShape(Rectangle())
+                .frame(minHeight: 32)
+                .draggable(owner)
+                .dropDestination(for: String.self) { items, location in
+                    guard let source = items.first, source != owner else { return false }
+                    ownerOrder.move(
+                        source,
+                        relativeTo: owner,
+                        after: location.y > 16,
+                        among: orderedOwners
+                    )
+                    return true
                 }
             }
         }
