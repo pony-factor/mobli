@@ -2329,12 +2329,51 @@ struct LauncherView: View {
 
 @MainActor final class LauncherAppDelegate: NSObject, NSApplicationDelegate {
     private let updater = LauncherAutoUpdater()
+    private var initialWindowObserver: NSObjectProtocol?
+    private var centeredInitialWindow = false
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
            let icon = NSImage(contentsOf: url) {
             NSApplication.shared.applicationIconImage = icon
         }
+        centerInitialWindowAfterLaunch()
         updater.start()
+    }
+
+    private func centerInitialWindowAfterLaunch() {
+        initialWindowObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            MainActor.assumeIsolated {
+                guard let window = notification.object as? NSWindow,
+                      window.canBecomeMain || window.canBecomeKey else { return }
+                self?.centerInitialWindow(window)
+            }
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self,
+                      !self.centeredInitialWindow,
+                      let window = NSApplication.shared.windows.first(where: {
+                          $0.canBecomeMain || $0.canBecomeKey
+                      }) else { return }
+                self.centerInitialWindow(window)
+            }
+        }
+    }
+
+    private func centerInitialWindow(_ window: NSWindow) {
+        guard !centeredInitialWindow else { return }
+        window.center()
+        centeredInitialWindow = true
+        if let initialWindowObserver {
+            NotificationCenter.default.removeObserver(initialWindowObserver)
+            self.initialWindowObserver = nil
+        }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
