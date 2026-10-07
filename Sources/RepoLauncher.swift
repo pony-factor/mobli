@@ -1660,14 +1660,6 @@ struct NotificationRow: View {
     }
 }
 
-enum SettingsSection: String, CaseIterable, Identifiable {
-    case appearance = "Appearance"
-    case repositories = "Repositories"
-    case organizations = "Organizations"
-
-    var id: String { rawValue }
-}
-
 struct LauncherView: View {
     @StateObject private var library = Library()
     @StateObject private var inbox = Inbox()
@@ -1678,7 +1670,6 @@ struct LauncherView: View {
     @State private var activity = false
     @State private var showingAgenda = false
     @State private var settings = false
-    @State private var settingsSection: SettingsSection = .appearance
     @State private var dropTarget: String?
     @State private var pinnedDropTarget: String?
     @State private var draggedPinnedOwner: String?
@@ -1727,10 +1718,7 @@ struct LauncherView: View {
                     }
                     tab("Activity", selected: activity && !settings) { notifications = false; activity = true; settings = false; showingAgenda = false }
                     tab("Notifications", selected: notifications && !settings) { notifications = true; activity = false; settings = false; showingAgenda = false }
-                    Button {
-                        settingsSection = .appearance
-                        settings = true
-                    } label: {
+                    Button { settings = true } label: {
                         Image(systemName: "gearshape")
                             .font(.system(size: 14, weight: settings ? .semibold : .regular))
                             .foregroundStyle(settings ? Palette.accent : Palette.muted)
@@ -2070,22 +2058,6 @@ struct LauncherView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 Text("Settings").font(.system(size: 22, weight: .semibold))
-                HStack(spacing: 8) {
-                    ForEach(SettingsSection.allCases) { section in
-                        Button {
-                            settingsSection = section
-                        } label: {
-                            Text(section.rawValue)
-                                .font(.system(size: 13, weight: settingsSection == section ? .semibold : .regular))
-                                .foregroundStyle(settingsSection == section ? Palette.text : Palette.muted)
-                                .padding(.horizontal, 12)
-                                .frame(height: 32)
-                                .background(settingsSection == section ? Palette.accent.opacity(0.16) : Color.clear)
-                                .clipShape(RoundedRectangle(cornerRadius: 7))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(library.refreshing || inbox.loading || activityFeed.loading
@@ -2098,19 +2070,39 @@ struct LauncherView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(Palette.muted)
 
-                switch settingsSection {
-                case .appearance:
-                    appearanceSettings
-                case .repositories:
-                    repositorySettings
-                case .organizations:
-                    organizationSettings
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 300), spacing: 16, alignment: .top)],
+                    alignment: .leading,
+                    spacing: 16
+                ) {
+                    settingsSectionColumn("Appearance") {
+                        appearanceSettings
+                    }
+                    settingsSectionColumn("Repositories") {
+                        repositorySettings
+                    }
+                    settingsSectionColumn("Organizations") {
+                        organizationSettings
+                    }
                 }
             }
             .padding(24)
-            .frame(maxWidth: 760, alignment: .leading)
+            .frame(maxWidth: 1180, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private func settingsSectionColumn<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Palette.text)
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private var appearanceSettings: some View {
