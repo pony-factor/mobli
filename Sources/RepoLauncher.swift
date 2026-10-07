@@ -2267,12 +2267,78 @@ struct LauncherView: View {
     }
 }
 
-final class LauncherAppDelegate: NSObject, NSApplicationDelegate {
+@MainActor final class LauncherAutoUpdater {
+    private var timer: Timer?
+    private var preparing: Process?
+    private let appURL = Bundle.main.bundleURL.resolvingSymlinksInPath()
+    private var cacheURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("studio.repository-launcher/updates")
+            .appendingPathComponent(appURL.path.utf8.map { String(format: "%02x", $0) }.joined())
+    }
+    private var sourceRoot: String {
+        if let file = Bundle.main.url(forResource: "source-root", withExtension: "txt"),
+           let path = try? String(contentsOf: file, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
+           FileManager.default.fileExists(atPath: path + "/build-app.sh") { return path }
+        return NSHomeDirectory() + "/GitHub/pony-factor/mobli"
+    }
+    private func process(_ mode: String) -> Process? {
+        guard let script = Bundle.main.url(forResource: "auto-update", withExtension: "sh") else { return nil }
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        task.arguments = [script.path, mode, appURL.path, sourceRoot, cacheURL.path]
+        try? FileManager.default.createDirectory(at: cacheURL, withIntermediateDirectories: true)
+        let log = cacheURL.appendingPathComponent("update.log")
+        if !FileManager.default.fileExists(atPath: log.path) {
+            FileManager.default.createFile(atPath: log.path, contents: nil)
+        }
+        let output = try? FileHandle(forWritingTo: log)
+        _ = try? output?.seekToEnd()
+        task.standardOutput = output ?? FileHandle.nullDevice
+        task.standardError = output ?? FileHandle.nullDevice
+        task.standardInput = FileHandle.nullDevice
+        return task
+    }
+    func start() {
+        check()
+        timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.check() }
+        }
+    }
+    private func check() {
+        guard preparing == nil, let task = process("prepare") else { return }
+        preparing = task
+        task.terminationHandler = { [weak self] _ in
+            Task { @MainActor in self?.preparing = nil }
+        }
+        do { try task.run() } catch { preparing = nil }
+    }
+    func installOnQuit(_ application: NSApplication) -> NSApplication.TerminateReply {
+        timer?.invalidate()
+        // Do not make quitting wait for a network request or compilation. A
+        // build still preparing remains available for the next session.
+        guard preparing == nil,
+              FileManager.default.fileExists(atPath: cacheURL.appendingPathComponent("ready.app").path),
+              let task = process("install") else { return .terminateNow }
+        task.terminationHandler = { _ in
+            Task { @MainActor in application.reply(toApplicationShouldTerminate: true) }
+        }
+        do { try task.run(); return .terminateLater } catch { return .terminateNow }
+    }
+}
+
+@MainActor final class LauncherAppDelegate: NSObject, NSApplicationDelegate {
+    private let updater = LauncherAutoUpdater()
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
            let icon = NSImage(contentsOf: url) {
             NSApplication.shared.applicationIconImage = icon
         }
+        updater.start()
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        updater.installOnQuit(sender)
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
