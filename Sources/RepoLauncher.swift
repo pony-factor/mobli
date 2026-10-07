@@ -1395,6 +1395,8 @@ struct FolderSearchBar: View {
     let searching: Bool
     let message: String?
     let cloning: Set<String>
+    let isPinned: (Repository) -> Bool
+    let togglePin: (Repository) -> Void
     let clone: (Repository) -> Void
     let open: (FolderSearchResult) -> Void
     @FocusState private var focused: Bool
@@ -1499,6 +1501,18 @@ struct FolderSearchBar: View {
                                             .padding(.trailing, 11)
                                             .accessibilityLabel("Clone \(repo.fullName)")
                                             .help("Clone \(repo.fullName) into ~/GitHub")
+                                        } else if let repo = result.repository, repo.isLocal, !repo.isWorktree {
+                                            let pinned = isPinned(repo)
+                                            Button { togglePin(repo) } label: {
+                                                Image(systemName: pinned ? "pin.fill" : "pin")
+                                                    .font(.system(size: 12))
+                                                    .foregroundStyle(pinned ? Palette.text : Palette.muted)
+                                                    .padding(8)
+                                            }
+                                            .buttonStyle(.plain)
+                                            .padding(.trailing, 3)
+                                            .accessibilityLabel(pinned ? "Unpin \(repo.fullName)" : "Pin \(repo.fullName)")
+                                            .help(pinned ? "Unpin repository" : "Pin repository to the top")
                                         }
                                     }
                                 }
@@ -1702,6 +1716,8 @@ struct LauncherView: View {
                     FolderSearchBar(query: $folderQuery, results: folderResults,
                                     searching: folderSearching, message: folderSearchMessage,
                                     cloning: library.cloning,
+                                    isPinned: { repoUsage.isPinned($0) },
+                                    togglePin: { repoUsage.togglePin($0) },
                                     clone: { repo in Task { await library.clone(repo) } }) { result in
                         folderResults = []
                         folderSearchMessage = nil
