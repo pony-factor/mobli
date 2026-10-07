@@ -4,9 +4,12 @@ import Foundation
     static func main() async throws {
         for remote in ["https://github.com/pony-factor/mobli.git", "git@github.com:pony-factor/mobli.git", "ssh://git@github.com/pony-factor/mobli.git"] {
             precondition(Discovery.githubOwner(from: remote) == "pony-factor")
+            let repository = Discovery.githubRepository(from: remote)
+            precondition(repository?.owner == "pony-factor" && repository?.name == "mobli")
         }
         for remote in ["https://example.com/pony-factor/mobli.git", "https://github.com/pony-factor", "/tmp/local.git"] {
             precondition(Discovery.githubOwner(from: remote) == nil)
+            precondition(Discovery.githubRepository(from: remote) == nil)
         }
         let rankingNow = Date(timeIntervalSince1970: 2_000_000_000)
         let sameActivity = rankingNow.addingTimeInterval(-14 * 86_400.0)
@@ -18,6 +21,40 @@ import Foundation
             "org-b/shared": RepositoryUsage(opens: 16, lastOpened: rankingNow)
         ]
         precondition(RepositoryRanking.ranked([orgA, orgB], usage: crossOrgUsage).first?.owner == "org-b")
+
+        let dedupeRoot = URL(fileURLWithPath: "/tmp/GitHub")
+        let canonicalCheckout = Repository(
+            url: dedupeRoot.appendingPathComponent("org-a/shared"),
+            owner: "org-a",
+            lastActivityAt: sameActivity,
+            githubName: "shared"
+        )
+        let duplicateCheckout = Repository(
+            url: dedupeRoot.appendingPathComponent("scratch/shared-copy"),
+            owner: "org-a",
+            lastActivityAt: rankingNow,
+            githubName: "shared"
+        )
+        let linkedWorktree = Repository(
+            url: dedupeRoot.appendingPathComponent("scratch/shared-worktree"),
+            owner: "org-a",
+            lastActivityAt: rankingNow,
+            githubName: "shared",
+            gitCommonDirectory: canonicalCheckout.url.appendingPathComponent(".git")
+        )
+        let deduplicated = Discovery.deduplicatedLocal(
+            [duplicateCheckout, linkedWorktree, canonicalCheckout],
+            root: dedupeRoot
+        )
+        precondition(deduplicated.count == 2)
+        precondition(deduplicated.contains { $0.id == canonicalCheckout.id && !$0.isWorktree })
+        precondition(deduplicated.contains { $0.id == linkedWorktree.id && $0.isWorktree })
+        precondition(linkedWorktree.fullName == "org-a/shared")
+        precondition(linkedWorktree.worktreeDetail == "Worktree · shared-worktree")
+        precondition(
+            RepositoryRanking.ranked([linkedWorktree, canonicalCheckout], usage: [:],
+                                     pinned: [canonicalCheckout.usageKey]).first?.id == canonicalCheckout.id
+        )
 
         let fresh = Repository(url: URL(fileURLWithPath: "/tmp/org-a/fresh"), owner: "org-a",
                                lastActivityAt: rankingNow.addingTimeInterval(-86_400))
