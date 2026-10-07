@@ -1758,7 +1758,7 @@ struct LauncherView: View {
                     .offset(y: 36)
                 }
             }
-            .frame(height: !notifications && !activity && !settings && !showingAgenda && !pinnedRepositories.isEmpty ? 32 : 76, alignment: .topLeading)
+            .frame(height: settings ? 32 : (!notifications && !activity && !showingAgenda && !pinnedRepositories.isEmpty ? 32 : 76), alignment: .topLeading)
             .zIndex(50)
             .padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 12)
             if settings {
