@@ -2168,6 +2168,24 @@ final class LauncherAppDelegate: NSObject, NSApplicationDelegate {
             NSApplication.shared.applicationIconImage = icon
         }
     }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard !flag else { return true }
+
+        let windows = sender.windows.filter { $0.canBecomeMain || $0.canBecomeKey }
+        guard let frontWindow = windows.first else { return true }
+
+        sender.unhide(nil)
+        for window in windows {
+            window.collectionBehavior.insert(.moveToActiveSpace)
+            if window.isMiniaturized {
+                window.deminiaturize(nil)
+            }
+        }
+        frontWindow.makeKeyAndOrderFront(nil)
+        sender.activate(ignoringOtherApps: true)
+        return false
+    }
 }
 
 @main struct RepoLauncherApp: App {
