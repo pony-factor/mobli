@@ -1720,6 +1720,8 @@ struct LauncherView: View {
     @State private var settings = false
     @State private var dropTarget: String?
     @State private var pinnedDropTarget: String?
+    @State private var settingsPinnedDropTarget: String?
+    @State private var settingsOwnerDropTarget: String?
     @State private var draggedPinnedOwner: String?
     @State private var pinnedDragMouseUpMonitor: Any?
     @AppStorage("studio.repository-launcher.show-repository-counts") private var showRepositoryCounts = true
@@ -2177,7 +2179,10 @@ struct LauncherView: View {
     }
 
     private var repositorySettings: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let orderedPins = PinnedRepositoryOrdering.ordered(
+            library.repos.filter { $0.isLocal && !$0.isWorktree }, keys: repoUsage.pinnedOrder
+        )
+        return VStack(alignment: .leading, spacing: 12) {
             settingsBlock {
                 Text("Repository display").font(.system(size: 15, weight: .semibold))
                 Toggle("Show repository counts in each category", isOn: $showRepositoryCounts)
@@ -2196,6 +2201,38 @@ struct LauncherView: View {
                 Text("Pinned local repositories move into the centered bar above the organization columns. Drag a top pin into its organization column to keep it pinned there, then drag column pins to reorder them. A cloud marks a GitHub repository that is not local yet; use its download button to clone it into ~/GitHub.")
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)
+                Text("Drag rows below to change the order of pinned repositories. Changes are saved automatically.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.muted)
+                if orderedPins.isEmpty {
+                    Text("Pin a repository on the Repositories page to reorder it here.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.muted)
+                } else {
+                    Divider().overlay(Color.white.opacity(0.08))
+                    ForEach(orderedPins) { repo in
+                        HStack(spacing: 8) {
+                            Image(systemName: "line.3.horizontal")
+                                .foregroundStyle(Palette.muted)
+                            Text(repo.fullName)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 6)
+                        .frame(height: 32)
+                        .contentShape(Rectangle())
+                        .help("Drag to reorder \(repo.fullName)")
+                        .accessibilityLabel("Drag to reorder \(repo.fullName)")
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 5)
+                                .stroke(settingsPinnedDropTarget == repo.usageKey ? Palette.text : .clear, lineWidth: 2)
+                        }
+                        .gesture(settingsOrderDrag(repo.usageKey, keys: orderedPins.map(\.usageKey), target: $settingsPinnedDropTarget) { target, after in
+                            repoUsage.movePinned(repo.usageKey, relativeTo: target, after: after)
+                        })
+                    }
+                }
             }
         }
     }
@@ -2230,21 +2267,37 @@ struct LauncherView: View {
                     .help("Move \(owner) later")
                     .accessibilityLabel("Move \(owner) later")
                 }
+                .frame(height: 32)
                 .contentShape(Rectangle())
-                .frame(minHeight: 32)
-                .draggable(owner)
-                .dropDestination(for: String.self) { items, location in
-                    guard let source = items.first, source != owner else { return false }
-                    ownerOrder.move(
-                        source,
-                        relativeTo: owner,
-                        after: location.y > 16,
-                        among: orderedOwners
-                    )
-                    return true
+                .overlay {
+                    RoundedRectangle(cornerRadius: 5)
+                        .stroke(settingsOwnerDropTarget == owner ? Palette.text : .clear, lineWidth: 2)
                 }
+                .gesture(settingsOrderDrag(owner, keys: orderedOwners, target: $settingsOwnerDropTarget) { target, after in
+                    ownerOrder.move(owner, relativeTo: target, after: after, among: orderedOwners)
+                })
             }
         }
+    }
+
+    private func settingsOrderDrag(_ source: String, keys: [String], target: Binding<String?>,
+                                   move: @escaping (String, Bool) -> Void) -> some Gesture {
+        // Settings rows are 32 points high with 12 points between them.
+        func destination(_ translation: CGFloat) -> String? {
+            guard let index = keys.firstIndex(of: source) else { return nil }
+            let offset = Int((translation / 44).rounded())
+            return keys[min(max(index + offset, 0), keys.count - 1)]
+        }
+        return DragGesture(minimumDistance: 4)
+            .onChanged { value in
+                let key = destination(value.translation.height)
+                target.wrappedValue = key == source ? nil : key
+            }
+            .onEnded { value in
+                defer { target.wrappedValue = nil }
+                guard let key = destination(value.translation.height), key != source else { return }
+                move(key, value.translation.height > 0)
+            }
     }
 
     private func settingsBlock<Content: View>(@ViewBuilder content: () -> Content) -> some View {
