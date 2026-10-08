@@ -18,9 +18,10 @@ import Foundation
         precondition(URLComponents(url: fallback.webURL, resolvingAgainstBaseURL: false)?.queryItems?.first?.value == "repo:example/project")
         let unchanged = try GitHubInbox.parseResponse(Data("HTTP/2.0 304 Not Modified\nX-Poll-Interval: 60\n\n".utf8))
         precondition(unchanged.status == 304 && unchanged.body.isEmpty)
-        let fresh = OwnerProfile(displayName: "Owner", avatar: Data(), fetchedAt: Date().addingTimeInterval(-6 * 86400))
-        let expired = OwnerProfile(displayName: "Owner", avatar: Data(), fetchedAt: Date().addingTimeInterval(-8 * 86400))
+        let fresh = OwnerProfile(displayName: "Owner", avatar: Data(), isOrganization: true, fetchedAt: Date().addingTimeInterval(-6 * 86400))
+        let expired = OwnerProfile(displayName: "Owner", avatar: Data(), isOrganization: false, fetchedAt: Date().addingTimeInterval(-8 * 86400))
         precondition(fresh.isFresh && !expired.isFresh)
+        precondition(fresh.isOrganization == true && expired.isOrganization == false)
         print("PASS: notification decoding, thread links, inbox fallback, HTTP headers, 304 responses, seven-day owner cache")
     }
 }
