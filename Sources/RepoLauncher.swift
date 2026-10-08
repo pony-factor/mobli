@@ -2471,6 +2471,20 @@ struct LauncherView: View {
     }
 }
 
+// Set the Space policy when SwiftUI attaches its content to a window, before
+// activation can send the user back to the window's previous desktop.
+private struct LauncherWindowConfiguration: NSViewRepresentable {
+    final class WindowView: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            window?.collectionBehavior.insert(.moveToActiveSpace)
+        }
+    }
+
+    func makeNSView(context: Context) -> WindowView { WindowView() }
+    func updateNSView(_ nsView: WindowView, context: Context) {}
+}
+
 @MainActor final class LauncherAppDelegate: NSObject, NSApplicationDelegate {
     private let updater = LauncherAutoUpdater()
     private var launcherWindowObserver: NSObjectProtocol?
@@ -2521,6 +2535,14 @@ struct LauncherView: View {
         updater.installOnQuit(sender)
     }
 
+    func applicationWillBecomeActive(_ notification: Notification) {
+        // Cover Command-Tab and activation of restored windows before they
+        // become key; didBecomeKeyNotification is too late for Space selection.
+        for window in NSApplication.shared.windows where window.canBecomeMain {
+            window.collectionBehavior.insert(.moveToActiveSpace)
+        }
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows _: Bool) -> Bool {
         // A window on another Space counts as visible. Handle Dock reopen even
         // then, and move only the selected window rather than every app window.
@@ -2542,7 +2564,10 @@ struct LauncherView: View {
     @NSApplicationDelegateAdaptor(LauncherAppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        WindowGroup("Repository Launcher") { LauncherView() }
+        WindowGroup("Repository Launcher") {
+            LauncherView()
+                .background(LauncherWindowConfiguration())
+        }
             .windowStyle(.hiddenTitleBar)
             .defaultSize(width: 1500, height: 760)
     }
