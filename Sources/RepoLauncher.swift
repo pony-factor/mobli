@@ -1011,21 +1011,16 @@ enum OwnerOrdering {
         guard let app = candidates.first(where: { FileManager.default.fileExists(atPath: $0 + "/Contents/Resources/app/bin/code") }) else {
             error = "Install Visual Studio Code in Applications to open folders."; return
         }
-        let vsCodeBundleIdentifier = "com.microsoft.VSCode"
         let task = Process()
         task.executableURL = URL(fileURLWithPath: app + "/Contents/Resources/app/bin/code")
+        // Let VS Code focus the newly opened folder; activating the app would raise unrelated windows.
         task.arguments = ["--new-window", url.path]
         task.standardOutput = FileHandle.nullDevice
         task.standardError = FileHandle.nullDevice
         let windows = NSApplication.shared.windows.filter { $0.isVisible && !$0.isMiniaturized }
         task.terminationHandler = { process in
             Task { @MainActor in
-                if process.terminationStatus == 0 {
-                    if let vsCode = NSRunningApplication.runningApplications(withBundleIdentifier: vsCodeBundleIdentifier).first {
-                        _ = vsCode.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
-                    }
-                    return
-                }
+                if process.terminationStatus == 0 { return }
                 self.error = "VS Code couldn’t open \(displayName). Try again."
                 NSApplication.shared.unhide(nil)
                 for window in windows { window.deminiaturize(nil) }
@@ -1033,9 +1028,6 @@ enum OwnerOrdering {
             }
         }
         do {
-            if #available(macOS 14.0, *) {
-                NSApplication.shared.yieldActivation(toApplicationWithBundleIdentifier: vsCodeBundleIdentifier)
-            }
             try task.run()
             for window in windows { window.miniaturize(nil) }
             NSApplication.shared.hide(nil)
