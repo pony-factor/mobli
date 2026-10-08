@@ -2473,7 +2473,7 @@ struct LauncherView: View {
 
 @MainActor final class LauncherAppDelegate: NSObject, NSApplicationDelegate {
     private let updater = LauncherAutoUpdater()
-    private var initialWindowObserver: NSObjectProtocol?
+    private var launcherWindowObserver: NSObjectProtocol?
     private var centeredInitialWindow = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -2486,14 +2486,17 @@ struct LauncherView: View {
     }
 
     private func centerInitialWindowAfterLaunch() {
-        initialWindowObserver = NotificationCenter.default.addObserver(
+        // Configure windows as they become key, not just when the Dock sends a
+        // reopen event. This also covers Command-Tab and newly opened windows.
+        launcherWindowObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didBecomeKeyNotification,
             object: nil,
             queue: .main
         ) { [weak self] notification in
             MainActor.assumeIsolated {
                 guard let window = notification.object as? NSWindow,
-                      window.canBecomeMain || window.canBecomeKey else { return }
+                      window.canBecomeMain else { return }
+                window.collectionBehavior.insert(.moveToActiveSpace)
                 self?.centerInitialWindow(window)
             }
         }
@@ -2501,10 +2504,8 @@ struct LauncherView: View {
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
                 guard let self,
-                      !self.centeredInitialWindow,
-                      let window = NSApplication.shared.windows.first(where: {
-                          $0.canBecomeMain || $0.canBecomeKey
-                      }) else { return }
+                      let window = NSApplication.shared.windows.first(where: { $0.canBecomeMain }) else { return }
+                window.collectionBehavior.insert(.moveToActiveSpace)
                 self.centerInitialWindow(window)
             }
         }
@@ -2514,28 +2515,22 @@ struct LauncherView: View {
         guard !centeredInitialWindow else { return }
         window.center()
         centeredInitialWindow = true
-        if let initialWindowObserver {
-            NotificationCenter.default.removeObserver(initialWindowObserver)
-            self.initialWindowObserver = nil
-        }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         updater.installOnQuit(sender)
     }
 
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        guard !flag else { return true }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows _: Bool) -> Bool {
+        // A window on another Space counts as visible. Handle Dock reopen even
+        // then, and move only the selected window rather than every app window.
+        let windows = sender.windows.filter { $0.canBecomeMain }
+        guard let frontWindow = sender.mainWindow ?? windows.first else { return true }
 
-        let windows = sender.windows.filter { $0.canBecomeMain || $0.canBecomeKey }
-        guard let frontWindow = windows.first else { return true }
-
+        frontWindow.collectionBehavior.insert(.moveToActiveSpace)
         sender.unhide(nil)
-        for window in windows {
-            window.collectionBehavior.insert(.moveToActiveSpace)
-            if window.isMiniaturized {
-                window.deminiaturize(nil)
-            }
+        if frontWindow.isMiniaturized {
+            frontWindow.deminiaturize(nil)
         }
         frontWindow.makeKeyAndOrderFront(nil)
         sender.activate(ignoringOtherApps: true)
