@@ -14,6 +14,25 @@ assert '.activateAllWindows' not in launch, "Do not raise every existing VS Code
 assert 'vsCode.activate(' not in launch and 'yieldActivation(' not in launch, "Leave window focus to the VS Code CLI"
 print("VS Code selected-window launch checks passed")
 PY
+# Regression guard: activating Mobli follows the current macOS Space, even if
+# its existing window is still visible on a different Space.
+python3 - "$repo_dir/Sources/RepoLauncher.swift" <<'PY'
+from pathlib import Path
+import sys
+source = Path(sys.argv[1]).read_text()
+delegate = source.split('@MainActor final class LauncherAppDelegate:', 1)[1].split('@main struct RepoLauncherApp:', 1)[0]
+setup, reopen = delegate.split('    func applicationShouldHandleReopen(', 1)
+assert 'forName: NSWindow.didBecomeKeyNotification' in setup, "Observe all new launcher windows"
+assert setup.count('window.collectionBehavior.insert(.moveToActiveSpace)') >= 2, "Configure each window before subsequent activation"
+assert 'removeObserver(launcherWindowObserver)' not in setup, "Observe future windows after the first one"
+assert 'hasVisibleWindows _: Bool' in reopen, "Handle Dock reopening even with visible windows"
+assert 'guard !flag' not in reopen, "Do not defer to macOS for windows on other Spaces"
+assert 'frontWindow.collectionBehavior.insert(.moveToActiveSpace)' in reopen, "Move the chosen window to the active Space"
+assert 'frontWindow.makeKeyAndOrderFront(nil)' in reopen, "Raise the chosen window"
+assert 'if frontWindow.isMiniaturized' in reopen, "Restore minimized windows"
+assert 'for window in windows' not in reopen, "Do not raise every window"
+print("Mobli current-desktop activation checks passed")
+PY
 python3 - "$repo_dir" "$check_dir" <<'PY'
 from pathlib import Path
 import sys

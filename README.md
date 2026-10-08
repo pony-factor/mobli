@@ -12,6 +12,8 @@ Find searches local folders and the connected GitHub repository catalog by repos
 
 Repository discovery also refreshes in the background when the app becomes active. It checks `.git` directories and worktree marker files and asks Git for the origin URL without reading repository contents or credential files.
 
+Activating Mobli from the Dock or app switcher brings its window onto your current macOS desktop (Space) rather than returning to the desktop where it was last active. Reopening also restores a minimized or hidden launcher window on the current desktop without raising every window.
+
 The compiled `Repository Launcher.app` lives in this repository and supports both Apple Silicon and Intel Macs. Drag that app to the Dock once. GitHub Actions tests and rebuilds it after changes reach `main`, then commits the new app back to `main`. The launcher checks for published builds every fifteen minutes and local source changes every minute. Updates prepare in the background and install at the same app path when you quit; reopen normally to use the new version. Quitting never waits for a download or build still in progress. Failed checks keep the current app. Local source changes take precedence over published builds and require Swift command-line tools to rebuild. Update checks use a separate cache and do not pull, stage, or modify your checkout. Update logs are saved under `~/Library/Application Support/studio.repository-launcher/updates`.
 
 For an optional stable link in your Applications folder, run this from the repository root before adding that link to the Dock:
