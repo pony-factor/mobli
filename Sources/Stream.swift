@@ -108,7 +108,7 @@ enum StreamParsing {
             }
 
             let raw = original[index]
-            let rawData = (try? JSONSerialization.data(withJSONObject: raw, options: [.prettyPrinted, .sortedKeys])) ?? Data()
+            let rawData = (try? JSONSerialization.data(withJSONObject: raw, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])) ?? Data()
             items.append(StreamEvent(
                 id: sourceID + ":" + event.id, sourceID: sourceID,
                 repository: event.repo.name, type: event.type,
