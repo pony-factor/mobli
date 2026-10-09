@@ -64,28 +64,60 @@ enum StreamParsing {
         let events = try JSONDecoder().decode([Event].self, from: data)
         guard let original = try JSONSerialization.jsonObject(with: data) as? [[String: Any]],
               original.count == events.count else { throw StreamFailure.response }
+
         let dateFormatter = ISO8601DateFormatter()
-        return zip(events, original).compactMap { event, original -> StreamEvent? in
+        var items: [StreamEvent] = []
+        for index in events.indices {
+            let event = events[index]
             guard let dateText = event.created_at,
                   let date = dateFormatter.date(from: dateText),
-                  let repositoryURL = URL(string: "https://github.com/" + event.repo.name) else { return nil }
+                  let repositoryURL = URL(string: "https://github.com/" + event.repo.name) else { continue }
+
             let payload = event.payload
-            let link = payload?.pull_request?.html_url ?? payload?.issue?.html_url
-                ?? payload?.comment?.html_url ?? payload?.release?.html_url
-                ?? payload?.head.flatMap { URL(string: repositoryURL.absoluteString + "/commit/" + $0) }
-                ?? repositoryURL
-            let summary = payload?.pull_request?.title ?? payload?.issue?.title
-                ?? payload?.release?.name ?? payload?.commits?.first?.message
-                ?? payload?.ref ?? payload?.comment?.body ?? event.type
-            let rawData = (try? JSONSerialization.data(withJSONObject: original, options: [.prettyPrinted, .sortedKeys])) ?? Data()
-            return StreamEvent(
+            let link: URL
+            if let candidate = payload?.pull_request?.html_url {
+                link = candidate
+            } else if let candidate = payload?.issue?.html_url {
+                link = candidate
+            } else if let candidate = payload?.comment?.html_url {
+                link = candidate
+            } else if let candidate = payload?.release?.html_url {
+                link = candidate
+            } else if let head = payload?.head,
+                      let candidate = URL(string: repositoryURL.absoluteString + "/commit/" + head) {
+                link = candidate
+            } else {
+                link = repositoryURL
+            }
+
+            let summary: String
+            if let title = payload?.pull_request?.title {
+                summary = title
+            } else if let title = payload?.issue?.title {
+                summary = title
+            } else if let name = payload?.release?.name {
+                summary = name
+            } else if let message = payload?.commits?.first?.message {
+                summary = message
+            } else if let ref = payload?.ref {
+                summary = ref
+            } else if let body = payload?.comment?.body {
+                summary = body
+            } else {
+                summary = event.type
+            }
+
+            let raw = original[index]
+            let rawData = (try? JSONSerialization.data(withJSONObject: raw, options: [.prettyPrinted, .sortedKeys])) ?? Data()
+            items.append(StreamEvent(
                 id: sourceID + ":" + event.id, sourceID: sourceID,
                 repository: event.repo.name, type: event.type,
                 action: payload?.action ?? "", actor: event.actor?.login ?? "Unknown",
                 summary: summary, occurredAt: date, url: link,
                 rawJSON: String(decoding: rawData, as: UTF8.self)
-            )
+            ))
         }
+        return items
     }
 }
 
