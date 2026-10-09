@@ -181,7 +181,7 @@ import Foundation
         let cache = RepositoryCache(directory: cacheDirectory)
         precondition(cache.load(root: root) == nil)
         try cache.save(RepositorySnapshot(root: root, repositories: [orgA, remoteOnly],
-                                          remoteRefreshedAt: rankingNow, remoteOwners: ["org-a"]))
+                                          remoteRefreshedAt: rankingNow, remoteOwners: ["org-a"], githubOrganizations: nil))
         // A new cache instance must restore both local and remote rows without Git or network access.
         let restored = RepositoryCache(directory: cacheDirectory).load(root: root)
         precondition(restored?.repositories.count == 2)
@@ -193,7 +193,7 @@ import Foundation
         precondition(cache.load(root: root.appendingPathComponent("other-root")) == nil)
         // A successful refresh replaces the previous catalog, including removed rows.
         try cache.save(RepositorySnapshot(root: root, repositories: [fresh],
-                                          remoteRefreshedAt: nil, remoteOwners: []))
+                                          remoteRefreshedAt: nil, remoteOwners: [], githubOrganizations: nil))
         precondition(cache.load(root: root)?.repositories.map(\.name) == ["fresh"])
         try Data("incomplete cache".utf8).write(to: cache.fileURL)
         precondition(cache.load(root: root) == nil)
