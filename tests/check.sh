@@ -2,7 +2,7 @@
 set -eu
 repo_dir=${0:A:h:h}
 check_dir=$(mktemp -d /tmp/mobli-checks.XXXXXX)
-trap 'rm -f "$check_dir/AgendaAPI.swift" "$check_dir/agenda-api-checks" "$check_dir/PinPlacement.swift" "$check_dir/pin-placement-checks" "$check_dir/Activity.swift" "$check_dir/activity-checks" "$check_dir/Owner.swift" "$check_dir/Inbox.swift" "$check_dir/checks" "$check_dir/Discovery.swift" "$check_dir/discovery-checks" "$check_dir/OwnerOrder.swift" "$check_dir/owner-order-checks" "$check_dir/Agenda.swift" "$check_dir/agenda-checks"; rmdir "$check_dir"' EXIT
+trap 'rm -f "$check_dir/AgendaAPI.swift" "$check_dir/agenda-api-checks" "$check_dir/PinPlacement.swift" "$check_dir/pin-placement-checks" "$check_dir/Activity.swift" "$check_dir/activity-checks" "$check_dir/StreamModel.swift" "$check_dir/stream-checks" "$check_dir/Owner.swift" "$check_dir/Inbox.swift" "$check_dir/checks" "$check_dir/Discovery.swift" "$check_dir/discovery-checks" "$check_dir/OwnerOrder.swift" "$check_dir/owner-order-checks" "$check_dir/Agenda.swift" "$check_dir/agenda-checks"; rmdir "$check_dir"' EXIT
 # Regression guard: launch only the requested folder; do not activate every VS Code window.
 python3 - "$repo_dir/Sources/RepoLauncher.swift" <<'PY'
 from pathlib import Path
@@ -46,6 +46,8 @@ source = (repo / 'Sources' / 'Notifications.swift').read_text()
 (out / 'Inbox.swift').write_text(source[:source.index('@MainActor final class Inbox:')])
 source = (repo / 'Sources' / 'Activity.swift').read_text()
 (out / 'Activity.swift').write_text(source[:source.index('@MainActor final class ActivityFeed:')])
+source = (repo / 'Sources' / 'Stream.swift').read_text()
+(out / 'StreamModel.swift').write_text('import Foundation\n' + source[source.index('struct StreamEvent:'):source.index('// MARK: - macOS Keychain-backed API keys')])
 source = (repo / 'Sources' / 'Agenda.swift').read_text()
 (out / 'Agenda.swift').write_text('import Foundation\n' + source[source.index('struct AgendaProject:'):source.index('enum AgendaFailure:')])
 (out / 'AgendaAPI.swift').write_text('import Foundation\nimport AppKit\nenum GitHubInbox { static let executable: String? = nil }\n' + source[source.index('struct AgendaProject:'):source.index('@MainActor final class Agenda:')])
@@ -55,6 +57,9 @@ xcrun swiftc -parse-as-library "$check_dir/Owner.swift" "$check_dir/Inbox.swift"
 
 xcrun swiftc -parse-as-library "$check_dir/Activity.swift" "$repo_dir/tests/ActivityChecks.swift" -o "$check_dir/activity-checks" -framework AppKit -framework SwiftUI
 "$check_dir/activity-checks"
+
+xcrun swiftc -parse-as-library "$check_dir/StreamModel.swift" "$repo_dir/tests/StreamChecks.swift" -o "$check_dir/stream-checks"
+"$check_dir/stream-checks"
 
 xcrun swiftc -parse-as-library "$check_dir/Discovery.swift" "$repo_dir/tests/DiscoveryChecks.swift" -o "$check_dir/discovery-checks"
 "$check_dir/discovery-checks"

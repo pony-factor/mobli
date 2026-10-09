@@ -50,3 +50,11 @@ Install GitHub CLI to connect an account. An existing GitHub CLI sign-in works a
 The ChatGPT repository extension currently uses personal tokens rather than a GitHub App sign-in. GitHub’s notifications API does not support GitHub App tokens or fine-grained personal tokens, so this launcher uses GitHub CLI’s OAuth connection with the notifications scope. API reference: https://docs.github.com/en/rest/activity/notifications
 
 Run focused notification model and HTTP parsing checks with `zsh tests/check.sh`.
+
+## GitHub event stream
+
+The **Stream** tab displays a live-updating explorer for GitHub events. In **Settings → GitHub**, add repository sources (`owner/name`), organization sources, or user sources. Public feeds work without a key. For authenticated requests, save one or more named GitHub personal access tokens and choose a key for each watched source. Tokens go into **macOS Keychain**; preferences store only key labels, UUIDs, and watched source names. Deleting a key deletes its Keychain entry and makes any corresponding watches public.
+
+The Stream tab combines events from all watched sources, remembers up to 500 observed events in memory while the tab is open, and checks for updates about once a minute while visible. GitHub may require a longer polling interval; the client honors the `X-Poll-Interval` response and conditional `ETag` responses. The feed is **polling, not a push/WebSocket connection**; it is not an exhaustive history or security audit trail. GitHub's organization and user events APIs expose public activity, and access to repository feeds depends on token permissions. Fine-grained PATs can use **Metadata (read)** permission for repository events. Do not grant write permissions just to view the stream.
+
+Search by keyword across event summaries, actors, repositories, types, and raw JSON. Filter by watched source or event type. Select an event to inspect its JSON and copy the data or open it on GitHub. Export the currently filtered results as JSON or CSV for further analysis. No event payloads are saved to disk by Mobli unless you explicitly export them.
