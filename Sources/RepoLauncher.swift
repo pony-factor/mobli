@@ -1712,10 +1712,12 @@ struct LauncherView: View {
     @StateObject private var library = Library()
     @StateObject private var inbox = Inbox()
     @StateObject private var activityFeed = ActivityFeed()
+    @StateObject private var streamPreferences = StreamPreferences()
     @StateObject private var ownerOrder = OwnerOrderPreferences()
     @StateObject private var repoUsage = RepositoryUsageStore()
     @State private var notifications = false
     @State private var activity = false
+    @State private var streaming = false
     @State private var showingAgenda = false
     @State private var settings = false
     @State private var dropTarget: String?
@@ -1756,8 +1758,8 @@ struct LauncherView: View {
         VStack(spacing: 0) {
             ZStack(alignment: .topLeading) {
                 HStack(spacing: 20) {
-                    tab("Repositories", selected: !notifications && !activity && !settings && !showingAgenda) { notifications = false; activity = false; settings = false; showingAgenda = false }
-                    tab("Agenda", selected: showingAgenda && !settings) { showingAgenda = true; notifications = false; activity = false; settings = false }
+                    tab("Repositories", selected: !notifications && !activity && !streaming && !settings && !showingAgenda) { notifications = false; activity = false; streaming = false; settings = false; showingAgenda = false }
+                    tab("Agenda", selected: showingAgenda && !settings) { showingAgenda = true; notifications = false; activity = false; streaming = false; settings = false }
                     Spacer()
                     if library.refreshing || inbox.loading || activityFeed.loading { ProgressView().controlSize(.small) }
                     if activity && !settings && activityFeed.needsConnection {
@@ -1766,8 +1768,9 @@ struct LauncherView: View {
                     if notifications && !settings {
                         Button("Connect GitHub", action: inbox.connect).buttonStyle(.plain).font(.system(size: 12))
                     }
-                    tab("Activity", selected: activity && !settings) { notifications = false; activity = true; settings = false; showingAgenda = false }
-                    tab("Notifications", selected: notifications && !settings) { notifications = true; activity = false; settings = false; showingAgenda = false }
+                    tab("Activity", selected: activity && !settings) { notifications = false; activity = true; streaming = false; settings = false; showingAgenda = false }
+                    tab("Stream", selected: streaming && !settings) { notifications = false; activity = false; streaming = true; settings = false; showingAgenda = false }
+                    tab("Notifications", selected: notifications && !settings) { notifications = true; activity = false; streaming = false; settings = false; showingAgenda = false }
                     Button { settings = true } label: {
                         Image(systemName: "gearshape")
                             .font(.system(size: 14, weight: settings ? .semibold : .regular))
@@ -1784,7 +1787,7 @@ struct LauncherView: View {
                     .help("Settings")
                 }
                 .frame(height: 32)
-                if !settings {
+                if !settings && !streaming {
                     FolderSearchBar(query: $folderQuery, results: folderResults,
                                     searching: folderSearching, message: folderSearchMessage,
                                     cloning: library.cloning,
@@ -1808,13 +1811,15 @@ struct LauncherView: View {
                     .offset(y: 36)
                 }
             }
-            .frame(height: settings ? 32 : (!notifications && !activity && !showingAgenda && !pinnedRepositories.isEmpty ? 32 : 76), alignment: .topLeading)
+            .frame(height: settings || streaming ? 32 : (!notifications && !activity && !showingAgenda && !pinnedRepositories.isEmpty ? 32 : 76), alignment: .topLeading)
             .zIndex(50)
             .padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 12)
             if settings {
                 settingsPage
             } else if showingAgenda {
                 AgendaView()
+            } else if streaming {
+                StreamView(preferences: streamPreferences)
             } else {
             if activity, let message = activityFeed.message {
                 Text(message).font(.system(size: 12)).foregroundStyle(Palette.muted).padding(.horizontal, 24).padding(.bottom, 8)
@@ -2133,6 +2138,9 @@ struct LauncherView: View {
                     }
                     settingsSectionColumn("Organizations") {
                         organizationSettings
+                    }
+                    settingsSectionColumn("GitHub") {
+                        StreamSettingsView(preferences: streamPreferences)
                     }
                 }
             }
