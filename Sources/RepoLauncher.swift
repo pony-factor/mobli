@@ -2564,7 +2564,9 @@ private struct LauncherWindowConfiguration: NSViewRepresentable {
     @NSApplicationDelegateAdaptor(LauncherAppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        WindowGroup("Repository Launcher") {
+        // Reopening from the Dock must reuse the launcher, including while it
+        // is hidden or minimized after opening a repository.
+        Window("Repository Launcher", id: "launcher") {
             LauncherView()
                 .background(LauncherWindowConfiguration())
         }
