@@ -2494,7 +2494,8 @@ private struct LauncherWindowConfiguration: NSViewRepresentable {
                     LauncherWindowSize.save(window.frame.size)
                 }
             }
-            window.setFrameAutosaveName("launcher")
+            // Size is saved separately; reopening should not restore an old origin.
+            window.setFrameAutosaveName("")
         }
 
         deinit {
@@ -2563,8 +2564,20 @@ private enum LauncherWindowSize {
 
     private func centerInitialWindow(_ window: NSWindow) {
         guard !centeredInitialWindow else { return }
-        window.center()
+        centerLauncherWindow(window)
         centeredInitialWindow = true
+    }
+
+    private func centerLauncherWindow(_ window: NSWindow) {
+        guard !window.styleMask.contains(.fullScreen),
+              let screen = NSScreen.screens.first else { return }
+        // NSWindow.center() places windows above the vertical midpoint.
+        // Use the main display's usable area for equal spacing on both axes.
+        let visibleFrame = screen.visibleFrame
+        window.setFrameOrigin(NSPoint(
+            x: visibleFrame.midX - window.frame.width / 2,
+            y: visibleFrame.midY - window.frame.height / 2
+        ))
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -2579,6 +2592,7 @@ private enum LauncherWindowSize {
         // become key; didBecomeKeyNotification is too late for Space selection.
         for window in NSApplication.shared.windows where window.canBecomeMain {
             window.collectionBehavior.insert(.moveToActiveSpace)
+            centerLauncherWindow(window)
         }
     }
 
@@ -2593,6 +2607,7 @@ private enum LauncherWindowSize {
         if frontWindow.isMiniaturized {
             frontWindow.deminiaturize(nil)
         }
+        centerLauncherWindow(frontWindow)
         frontWindow.makeKeyAndOrderFront(nil)
         sender.activate(ignoringOtherApps: true)
         return false
