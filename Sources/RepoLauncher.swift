@@ -2475,14 +2475,50 @@ struct LauncherView: View {
 // activation can send the user back to the window's previous desktop.
 private struct LauncherWindowConfiguration: NSViewRepresentable {
     final class WindowView: NSView {
+        private var resizeObserver: NSObjectProtocol?
+        private weak var configuredWindow: NSWindow?
+
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            window?.collectionBehavior.insert(.moveToActiveSpace)
+            guard let window else { return }
+            window.collectionBehavior.insert(.moveToActiveSpace)
+            guard configuredWindow !== window else { return }
+            if let resizeObserver { NotificationCenter.default.removeObserver(resizeObserver) }
+            configuredWindow = window
+            resizeObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didResizeNotification, object: window, queue: .main
+            ) { notification in
+                MainActor.assumeIsolated {
+                    guard let window = notification.object as? NSWindow,
+                          !window.styleMask.contains(.fullScreen) else { return }
+                    LauncherWindowSize.save(window.frame.size)
+                }
+            }
+            window.setFrameAutosaveName("launcher")
+        }
+
+        deinit {
+            if let resizeObserver { NotificationCenter.default.removeObserver(resizeObserver) }
         }
     }
 
     func makeNSView(context: Context) -> WindowView { WindowView() }
     func updateNSView(_ nsView: WindowView, context: Context) {}
+}
+
+private enum LauncherWindowSize {
+    static var saved: CGSize {
+        let defaults = UserDefaults.standard
+        let width = defaults.double(forKey: "launcher.window-width")
+        let height = defaults.double(forKey: "launcher.window-height")
+        return CGSize(width: width >= 650 ? width : 1500,
+                      height: height >= 400 ? height : 760)
+    }
+
+    static func save(_ size: CGSize) {
+        UserDefaults.standard.set(size.width, forKey: "launcher.window-width")
+        UserDefaults.standard.set(size.height, forKey: "launcher.window-height")
+    }
 }
 
 @MainActor final class LauncherAppDelegate: NSObject, NSApplicationDelegate {
@@ -2532,7 +2568,10 @@ private struct LauncherWindowConfiguration: NSViewRepresentable {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        updater.installOnQuit(sender)
+        if let window = sender.windows.first(where: { $0.canBecomeMain && !$0.styleMask.contains(.fullScreen) }) {
+            LauncherWindowSize.save(window.frame.size)
+        }
+        return updater.installOnQuit(sender)
     }
 
     func applicationWillBecomeActive(_ notification: Notification) {
@@ -2571,6 +2610,6 @@ private struct LauncherWindowConfiguration: NSViewRepresentable {
                 .background(LauncherWindowConfiguration())
         }
             .windowStyle(.hiddenTitleBar)
-            .defaultSize(width: 1500, height: 760)
+            .defaultSize(width: LauncherWindowSize.saved.width, height: LauncherWindowSize.saved.height)
     }
 }

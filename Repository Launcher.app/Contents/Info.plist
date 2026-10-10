@@ -17,11 +17,11 @@
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>LauncherSourceClean</key>
-	<string>true</string>
+	<string>false</string>
 	<key>LauncherSourceFingerprint</key>
-	<string>aee36049bf33e0788ba4a7843010b4eb4bad5ea8404ab210aa448b2a9c061fd3</string>
+	<string>fca9ff47dee4da7d06865e71931c9f71beae152551b5992627500e51c5d5640e</string>
 	<key>LauncherSourceRevision</key>
-	<string>ab4aab91bb32eb39226a3d308290bdf7e3249926</string>
+	<string>54dcdd65835a800680f49001f9c15b91a5b4914d</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 </dict>
