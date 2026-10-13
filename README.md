@@ -31,6 +31,8 @@ The build bundles the Mayor Mare icon from `AppIcon.icns`, matching the existing
 
 Pull requests run the tests, build both architectures, and verify a universal app without publishing changes. On `main`, the workflow commits only the compiled app, skips publication if newer source changes have arrived, and uses GitHub's workflow token so its generated commit does not start another build. You can also start **Build app** manually on `main`. Workflow runs and optional downloads are available at https://github.com/pony-factor/mobli/actions/workflows/build-app.yml; downloads remain available for 30 days.
 
+Pinned-repository titles and owner/organization column headings use 16-point bold, classic-era Montserrat. Mobli first tries the locally installed `Montserrat Classic Bold` face, if available, and otherwise uses the original 2015 Montserrat Bold font bundled with the macOS app (under the SIL Open Font License in `Assets/Fonts/OFL.txt`). The original font is a close open-licensed substitute, not a confirmed identical version of Canva's separately named “Montserrat Classic.” Other interface text retains the native macOS system font. The build embeds the font in `Contents/Resources/Fonts`, activates it via `ATSApplicationFontsPath`, and fingerprints font assets so local updates rebuild when they change.
+
 ## Agenda
 
 The Agenda tab sits beside Repositories on the left. It shows your GitHub project as simple vertical task lists grouped by Status, in the project's status-option order. Issues and pull requests open on GitHub; draft tasks open the project. Archived and deleted items are excluded, and the launcher loads every page of project items.
