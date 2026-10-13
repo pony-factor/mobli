@@ -5,9 +5,13 @@ installed_app=$1
 fixture=$(mktemp -d /tmp/mobli-update-checks.XXXXXX)
 trap 'rm -rf "$fixture"' EXIT
 mkdir -p "$fixture/source" "$fixture/cache"
-for input in Sources scripts AppIcon.icns build-app.sh; do
+for input in Sources Assets scripts AppIcon.icns build-app.sh; do
   ditto "$repo_dir/$input" "$fixture/source/$input"
 done
+# Both architectures must embed the classic-era Montserrat fallback and its license.
+cmp "$repo_dir/Assets/Fonts/Montserrat-Bold.ttf" "$installed_app/Contents/Resources/Fonts/Montserrat-Bold.ttf"
+cmp "$repo_dir/Assets/Fonts/OFL.txt" "$installed_app/Contents/Resources/Fonts/OFL.txt"
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :ATSApplicationFontsPath' "$installed_app/Contents/Info.plist")" == "Fonts/" ]]
 app="$fixture/Installed.app"
 ditto "$installed_app" "$app"
 touch "$fixture/cache/last-remote-check"

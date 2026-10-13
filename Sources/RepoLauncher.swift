@@ -1270,6 +1270,20 @@ struct RepositoryRow: View {
     }
 }
 
+// Keep the requested classic bold face on headings only; other UI text stays native.
+enum HeadingTypography {
+    static func classicBold(size: CGFloat) -> Font {
+        // Canva's "Montserrat Classic" is not supplied as a redistributable face.
+        // Prefer it when present locally; otherwise use the bundled original Montserrat Bold.
+        for name in ["MontserratClassic-Bold", "Montserrat Classic Bold", "Montserrat-Bold"] {
+            if NSFont(name: name, size: size) != nil {
+                return .custom(name, size: size)
+            }
+        }
+        return .system(size: size, weight: .bold)
+    }
+}
+
 struct PinnedRepositoryItem: View {
     static let width: CGFloat = 260
     static let height: CGFloat = 60
@@ -1295,7 +1309,7 @@ struct PinnedRepositoryItem: View {
                             .clipShape(RoundedRectangle(cornerRadius: 5))
                     }
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(repo.name).font(.system(size: 16, weight: .semibold)).lineLimit(1)
+                        Text(repo.name).font(HeadingTypography.classicBold(size: 16)).lineLimit(1)
                             .background(SecondaryClickRegion {
                                 if let url = repo.githubURL { NSWorkspace.shared.open(url) }
                             })
@@ -1351,7 +1365,7 @@ struct OwnerHeader: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             VStack(alignment: .leading, spacing: 3) {
-                Text(displayTitle).font(.system(size: 16, weight: .semibold)).lineLimit(2)
+                Text(displayTitle).font(HeadingTypography.classicBold(size: 16)).lineLimit(2)
                 if showOwnerSlugs, displayTitle != owner {
                     Text(owner).font(.system(size: 12)).foregroundStyle(Palette.muted)
                 }
