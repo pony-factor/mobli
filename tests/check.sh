@@ -76,7 +76,7 @@ python3 - "$repo_dir/Sources/CalendarReminders.swift" "$check_dir/CalendarModel.
 from pathlib import Path
 import sys
 source = Path(sys.argv[1]).read_text()
-model = source[source.index('struct CalendarDayEntry:'):source.index('enum CalendarSourceError:')]
+model = source[source.index('struct CalendarDayEntry:'):source.index('actor CalendarDocumentLoader {')]
 Path(sys.argv[2]).write_text('import Foundation\n' + model)
 PY
 xcrun swiftc -parse-as-library "$check_dir/CalendarModel.swift" "$repo_dir/tests/CalendarDayChecks.swift" -o "$check_dir/calendar-day-checks"
