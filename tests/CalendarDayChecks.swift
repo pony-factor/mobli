@@ -45,9 +45,10 @@ import Foundation
         precondition(flightEntries.count == 1)
         precondition(flightEntries[0].title == "Flight FLL → CLT")
         let interveningDay = ISO8601DateFormatter().date(from: "2026-12-25T12:00:00Z")!
-        precondition(try CalendarDayParsing.entries(
+        let interveningEntries = try CalendarDayParsing.entries(
             documents: ["flights.json": flights], on: interveningDay, in: newYork
-        ).isEmpty)
+        )
+        precondition(interveningEntries.isEmpty)
 
         let late = ISO8601DateFormatter().date(from: "2026-10-27T03:45:00Z")!
         precondition(CalendarDayParsing.dayKey(late, in: utc) == "2026-10-27")
