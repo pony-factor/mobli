@@ -3,6 +3,24 @@ set -eu
 repo_dir=${0:A:h:h}
 check_dir=$(mktemp -d /tmp/mobli-checks.XXXXXX)
 trap 'rm -f "$check_dir/AgendaAPI.swift" "$check_dir/agenda-api-checks" "$check_dir/PinPlacement.swift" "$check_dir/pin-placement-checks" "$check_dir/Activity.swift" "$check_dir/activity-checks" "$check_dir/StreamModel.swift" "$check_dir/stream-checks" "$check_dir/Owner.swift" "$check_dir/Inbox.swift" "$check_dir/checks" "$check_dir/Discovery.swift" "$check_dir/discovery-checks" "$check_dir/OwnerOrder.swift" "$check_dir/owner-order-checks" "$check_dir/Agenda.swift" "$check_dir/agenda-checks"; rmdir "$check_dir"' EXIT
+# Regression guard: the custom face only changes pinned and owner headings.
+python3 - "$repo_dir" <<'PY'
+from pathlib import Path
+import sys
+repo = Path(sys.argv[1])
+source = (repo / "Sources/RepoLauncher.swift").read_text()
+assert "enum HeadingTypography" in source
+assert '["MontserratClassic-Bold", "Montserrat Classic Bold", "Montserrat-Bold"]' in source
+assert source.count(".font(HeadingTypography.classicBold(size: 16))") == 2
+assert "Text(repo.name).font(HeadingTypography.classicBold(size: 16))" in source
+assert "Text(displayTitle).font(HeadingTypography.classicBold(size: 16))" in source
+build = (repo / "build-app.sh").read_text()
+assert '<key>ATSApplicationFontsPath</key><string>Fonts/</string>' in build
+assert "Assets/Fonts/Montserrat-Bold.ttf" in build and "Assets/Fonts/OFL.txt" in build
+assert (repo / "Assets/Fonts/Montserrat-Bold.ttf").stat().st_size > 10_000
+assert "SIL OPEN FONT LICENSE" in (repo / "Assets/Fonts/OFL.txt").read_text()
+print("Pinned and organization heading typography checks passed")
+PY
 # Regression guard: launch only the requested folder; do not activate every VS Code window.
 python3 - "$repo_dir/Sources/RepoLauncher.swift" <<'PY'
 from pathlib import Path

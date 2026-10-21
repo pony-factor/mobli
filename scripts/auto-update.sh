@@ -78,8 +78,8 @@ if [[ "$(plist_value "$app_path" LauncherSourceClean)" != true ]]; then
   # Once local edits have been committed, their commit becomes the baseline;
   # only a published descendant may replace that development build.
   [[ "${current:-}" == "$installed" ]] || exit 0
-  /usr/bin/git -C "$source_root" diff --quiet HEAD -- Sources AppIcon.icns build-app.sh scripts || exit 0
-  [[ -z "$(/usr/bin/git -C "$source_root" ls-files --others --exclude-standard -- Sources scripts)" ]] || exit 0
+  /usr/bin/git -C "$source_root" diff --quiet HEAD -- Sources Assets AppIcon.icns build-app.sh scripts || exit 0
+  [[ -z "$(/usr/bin/git -C "$source_root" ls-files --others --exclude-standard -- Sources Assets scripts)" ]] || exit 0
   baseline=$(/usr/bin/git -C "$source_root" rev-parse HEAD)
 fi
 [[ "$revision" != "$baseline" ]] || exit 0
