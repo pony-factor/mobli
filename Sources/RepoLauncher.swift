@@ -1727,6 +1727,7 @@ struct LauncherView: View {
     @StateObject private var inbox = Inbox()
     @StateObject private var activityFeed = ActivityFeed()
     @StateObject private var streamPreferences = StreamPreferences()
+    @StateObject private var calendarReminders = CalendarReminderCoordinator()
     @StateObject private var ownerOrder = OwnerOrderPreferences()
     @StateObject private var repoUsage = RepositoryUsageStore()
     @State private var notifications = false
@@ -2031,6 +2032,7 @@ struct LauncherView: View {
         .tint(Palette.accent)
         .frame(minWidth: 650, minHeight: 400)
         .task { await library.refresh(priorityOwners: ownerOrder.manualOwners) }
+        .task { calendarReminders.start() }
         .task(id: [folderQuery] + library.repos.map { "\($0.id):\($0.isLocal)" }) {
             let query = folderQuery.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !query.isEmpty else {
@@ -2085,6 +2087,7 @@ struct LauncherView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
+                calendarReminders.check()
                 Task {
                     if activity {
                         await library.refresh(priorityOwners: ownerOrder.manualOwners)
@@ -2155,6 +2158,9 @@ struct LauncherView: View {
                     }
                     settingsSectionColumn("GitHub") {
                         StreamSettingsView(preferences: streamPreferences)
+                    }
+                    settingsSectionColumn("Calendar reminders") {
+                        settingsBlock { CalendarReminderSettings(coordinator: calendarReminders) }
                     }
                 }
             }

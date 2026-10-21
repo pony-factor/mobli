@@ -2,7 +2,7 @@
 set -eu
 repo_dir=${0:A:h:h}
 check_dir=$(mktemp -d /tmp/mobli-checks.XXXXXX)
-trap 'rm -f "$check_dir/AgendaAPI.swift" "$check_dir/agenda-api-checks" "$check_dir/PinPlacement.swift" "$check_dir/pin-placement-checks" "$check_dir/Activity.swift" "$check_dir/activity-checks" "$check_dir/StreamModel.swift" "$check_dir/stream-checks" "$check_dir/Owner.swift" "$check_dir/Inbox.swift" "$check_dir/checks" "$check_dir/Discovery.swift" "$check_dir/discovery-checks" "$check_dir/OwnerOrder.swift" "$check_dir/owner-order-checks" "$check_dir/Agenda.swift" "$check_dir/agenda-checks"; rmdir "$check_dir"' EXIT
+trap 'rm -f "$check_dir/CalendarModel.swift" "$check_dir/calendar-day-checks" "$check_dir/AgendaAPI.swift" "$check_dir/agenda-api-checks" "$check_dir/PinPlacement.swift" "$check_dir/pin-placement-checks" "$check_dir/Activity.swift" "$check_dir/activity-checks" "$check_dir/StreamModel.swift" "$check_dir/stream-checks" "$check_dir/Owner.swift" "$check_dir/Inbox.swift" "$check_dir/checks" "$check_dir/Discovery.swift" "$check_dir/discovery-checks" "$check_dir/OwnerOrder.swift" "$check_dir/owner-order-checks" "$check_dir/Agenda.swift" "$check_dir/agenda-checks"; rmdir "$check_dir"' EXIT
 # Regression guard: the custom face only changes pinned and owner headings.
 python3 - "$repo_dir" <<'PY'
 from pathlib import Path
@@ -70,6 +70,18 @@ source = (repo / 'Sources' / 'Agenda.swift').read_text()
 (out / 'Agenda.swift').write_text('import Foundation\n' + source[source.index('struct AgendaProject:'):source.index('enum AgendaFailure:')])
 (out / 'AgendaAPI.swift').write_text('import Foundation\nimport AppKit\nenum GitHubInbox { static let executable: String? = nil }\n' + source[source.index('struct AgendaProject:'):source.index('@MainActor final class Agenda:')])
 PY
+# Build the platform-neutral calendar model independently of AppKit/SwiftUI,
+# so malformed and timezone-sensitive calendar data is checked in CI.
+python3 - "$repo_dir/Sources/CalendarReminders.swift" "$check_dir/CalendarModel.swift" <<'PY'
+from pathlib import Path
+import sys
+source = Path(sys.argv[1]).read_text()
+model = source[source.index('struct CalendarDayEntry:'):source.index('actor CalendarDocumentLoader {')]
+Path(sys.argv[2]).write_text('import Foundation\n' + model)
+PY
+xcrun swiftc -parse-as-library "$check_dir/CalendarModel.swift" "$repo_dir/tests/CalendarDayChecks.swift" -o "$check_dir/calendar-day-checks"
+"$check_dir/calendar-day-checks"
+
 xcrun swiftc -parse-as-library "$check_dir/Owner.swift" "$check_dir/Inbox.swift" "$repo_dir/tests/InboxChecks.swift" -o "$check_dir/checks" -framework AppKit
 "$check_dir/checks"
 
