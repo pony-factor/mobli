@@ -70,14 +70,14 @@ enum CalendarDayParsing {
                 }
             }
             if let events = object["events"] as? [[String: Any]] {
-                for (index, event) in events where dateMatches(event) {
+                for (index, event) in events.enumerated() where dateMatches(event) {
                     let title = string(event, "title") ?? string(event, "name") ?? string(event, "summary") ?? "Calendar event"
                     let identifier = string(event, "id") ?? "\(filename):\(index):\(title)"
                     add("event:\(identifier)", title, string(event, "description") ?? "Calendar event")
                 }
             }
             if let trips = object["trips"] as? [[String: Any]] {
-                for (index, trip) in trips {
+                for (index, trip) in trips.enumerated() {
                     let title = string(trip, "name") ?? string(trip, "title") ?? "Trip"
                     let status = string(trip, "booking_status") ?? ""
                     let flights = trip["flights"] as? [[String: Any]] ?? []
@@ -87,7 +87,7 @@ enum CalendarDayParsing {
                         }
                         continue
                     }
-                    for (legIndex, flight) in flights {
+                    for (legIndex, flight) in flights.enumerated() {
                         guard let flightDate = string(flight, "date").flatMap(validDate), flightDate == today else { continue }
                         let origin = (flight["origin"] as? [String: Any])?["airport_code"] as? String ?? "?"
                         let destination = (flight["destination"] as? [String: Any])?["airport_code"] as? String ?? "?"
