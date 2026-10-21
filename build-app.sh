@@ -6,6 +6,7 @@ mkdir -p "$destination/Contents/MacOS" "$destination/Contents/Resources"
 xcrun swiftc -O -parse-as-library "$source_dir/Sources/RepoLauncher.swift" "$source_dir/Sources/Notifications.swift" "$source_dir/Sources/Agenda.swift" "$source_dir/Sources/Activity.swift" "$source_dir/Sources/Stream.swift" -o "$destination/Contents/MacOS/RepositoryLauncher" -framework SwiftUI -framework AppKit -framework Security
 ditto "$source_dir/AppIcon.icns" "$destination/Contents/Resources/AppIcon.icns"
 ditto "$source_dir/scripts/auto-update.sh" "$destination/Contents/Resources/auto-update.sh"
+ditto "$source_dir/scripts/open-workspace.js" "$destination/Contents/Resources/open-workspace.js"
 cat > "$destination/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

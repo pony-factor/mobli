@@ -41,26 +41,6 @@ struct Repository: Identifiable, Codable, Sendable {
     }
 }
 
-enum LaunchWorkspace {
-    static func create(for folder: URL, displayName: String, parent: URL? = nil) throws -> URL {
-        let base = parent ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("studio.repository-launcher/workspaces", isDirectory: true)
-        let directory = base.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        do {
-            let workspace = directory.appendingPathComponent("Repository.code-workspace")
-            let data = try JSONSerialization.data(withJSONObject: [
-                "folders": [["path": folder.standardizedFileURL.path, "name": displayName]]
-            ], options: [.prettyPrinted, .sortedKeys])
-            try data.write(to: workspace, options: .atomic)
-            return workspace
-        } catch {
-            try? FileManager.default.removeItem(at: directory)
-            throw error
-        }
-    }
-}
-
 enum Discovery {
     static func githubRepository(from remote: String) -> (owner: String, name: String)? {
         let value = remote.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1031,27 +1011,24 @@ enum OwnerOrdering {
         guard let app = candidates.first(where: { FileManager.default.fileExists(atPath: $0 + "/Contents/Resources/app/bin/code") }) else {
             error = "Install Visual Studio Code in Applications to open folders."; return
         }
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: app + "/Contents/Resources/app/bin/code")
-        // A folder already open elsewhere wins over --new-window in VS Code.
-        // A distinct workspace identity keeps this launch on the current Space,
-        // while pointing at the selected checkout, including its uncommitted work.
-        let workspace: URL
-        do {
-            workspace = try LaunchWorkspace.create(for: url, displayName: displayName)
-        } catch {
-            self.error = "Couldn’t prepare a workspace for \(displayName): \(error.localizedDescription)"
+        guard let script = Bundle.main.url(forResource: "open-workspace", withExtension: "js") else {
+            error = "The Sweetiebot workspace launcher is missing. Rebuild Repository Launcher."
             return
         }
-        task.arguments = ["--new-window", workspace.path]
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: app + "/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper")
+        var environment = ProcessInfo.processInfo.environment
+        environment["ELECTRON_RUN_AS_NODE"] = "1"
+        task.environment = environment
+        // Use the same independent-clone implementation as Sweetiebot's title bar.
+        task.arguments = [script.path, app + "/Contents/Resources/app/bin/code", url.path, displayName]
         task.standardOutput = FileHandle.nullDevice
         task.standardError = FileHandle.nullDevice
         let windows = NSApplication.shared.windows.filter { $0.isVisible && !$0.isMiniaturized }
         task.terminationHandler = { process in
             Task { @MainActor in
                 if process.terminationStatus == 0 { return }
-                try? FileManager.default.removeItem(at: workspace.deletingLastPathComponent())
-                self.error = "VS Code couldn’t open \(displayName). Try again."
+                self.error = "Couldn’t create a Sweetiebot workspace for \(displayName). Make sure Sweetiebot is installed and the repository has a local main branch."
                 NSApplication.shared.unhide(nil)
                 for window in windows { window.deminiaturize(nil) }
                 NSApplication.shared.activate(ignoringOtherApps: true)
@@ -1062,7 +1039,6 @@ enum OwnerOrdering {
             for window in windows { window.miniaturize(nil) }
             NSApplication.shared.hide(nil)
         } catch {
-            try? FileManager.default.removeItem(at: workspace.deletingLastPathComponent())
             self.error = error.localizedDescription
         }
     }
