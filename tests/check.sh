@@ -3,13 +3,14 @@ set -eu
 repo_dir=${0:A:h:h}
 check_dir=$(mktemp -d /tmp/mobli-checks.XXXXXX)
 trap 'rm -f "$check_dir/AgendaAPI.swift" "$check_dir/agenda-api-checks" "$check_dir/PinPlacement.swift" "$check_dir/pin-placement-checks" "$check_dir/Activity.swift" "$check_dir/activity-checks" "$check_dir/StreamModel.swift" "$check_dir/stream-checks" "$check_dir/Owner.swift" "$check_dir/Inbox.swift" "$check_dir/checks" "$check_dir/Discovery.swift" "$check_dir/discovery-checks" "$check_dir/OwnerOrder.swift" "$check_dir/owner-order-checks" "$check_dir/Agenda.swift" "$check_dir/agenda-checks"; rmdir "$check_dir"' EXIT
-# Regression guard: launch only the requested folder; do not activate every VS Code window.
+# Regression guard: use a distinct workspace so an already-open folder cannot capture the launch.
 python3 - "$repo_dir/Sources/RepoLauncher.swift" <<'PY'
 from pathlib import Path
 import sys
 source = Path(sys.argv[1]).read_text()
 launch = source.split('private func openInVSCode(', 1)[1].split('\nenum Palette', 1)[0]
-assert 'task.arguments = ["--new-window", url.path]' in launch, "Selected folder must open in its own VS Code window"
+assert 'LaunchWorkspace.create(for: url, displayName: displayName)' in launch, "Wrap the selected folder in a unique workspace"
+assert 'task.arguments = ["--new-window", workspace.path]' in launch, "Selected workspace must open in its own VS Code window"
 assert '.activateAllWindows' not in launch, "Do not raise every existing VS Code window"
 assert 'vsCode.activate(' not in launch and 'yieldActivation(' not in launch, "Leave window focus to the VS Code CLI"
 print("VS Code selected-window launch checks passed")

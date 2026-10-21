@@ -41,6 +41,26 @@ struct Repository: Identifiable, Codable, Sendable {
     }
 }
 
+enum LaunchWorkspace {
+    static func create(for folder: URL, displayName: String, parent: URL? = nil) throws -> URL {
+        let base = parent ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("studio.repository-launcher/workspaces", isDirectory: true)
+        let directory = base.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        do {
+            let workspace = directory.appendingPathComponent("Repository.code-workspace")
+            let data = try JSONSerialization.data(withJSONObject: [
+                "folders": [["path": folder.standardizedFileURL.path, "name": displayName]]
+            ], options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: workspace, options: .atomic)
+            return workspace
+        } catch {
+            try? FileManager.default.removeItem(at: directory)
+            throw error
+        }
+    }
+}
+
 enum Discovery {
     static func githubRepository(from remote: String) -> (owner: String, name: String)? {
         let value = remote.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1013,14 +1033,24 @@ enum OwnerOrdering {
         }
         let task = Process()
         task.executableURL = URL(fileURLWithPath: app + "/Contents/Resources/app/bin/code")
-        // Let VS Code focus the newly opened folder; activating the app would raise unrelated windows.
-        task.arguments = ["--new-window", url.path]
+        // A folder already open elsewhere wins over --new-window in VS Code.
+        // A distinct workspace identity keeps this launch on the current Space,
+        // while pointing at the selected checkout, including its uncommitted work.
+        let workspace: URL
+        do {
+            workspace = try LaunchWorkspace.create(for: url, displayName: displayName)
+        } catch {
+            self.error = "Couldn’t prepare a workspace for \(displayName): \(error.localizedDescription)"
+            return
+        }
+        task.arguments = ["--new-window", workspace.path]
         task.standardOutput = FileHandle.nullDevice
         task.standardError = FileHandle.nullDevice
         let windows = NSApplication.shared.windows.filter { $0.isVisible && !$0.isMiniaturized }
         task.terminationHandler = { process in
             Task { @MainActor in
                 if process.terminationStatus == 0 { return }
+                try? FileManager.default.removeItem(at: workspace.deletingLastPathComponent())
                 self.error = "VS Code couldn’t open \(displayName). Try again."
                 NSApplication.shared.unhide(nil)
                 for window in windows { window.deminiaturize(nil) }
@@ -1031,7 +1061,10 @@ enum OwnerOrdering {
             try task.run()
             for window in windows { window.miniaturize(nil) }
             NSApplication.shared.hide(nil)
-        } catch { self.error = error.localizedDescription }
+        } catch {
+            try? FileManager.default.removeItem(at: workspace.deletingLastPathComponent())
+            self.error = error.localizedDescription
+        }
     }
 }
 

@@ -114,6 +114,17 @@ import Foundation
 
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
+        let workspaceParent = root.appendingPathComponent("launch-workspaces")
+        let selectedFolder = root.appendingPathComponent("a folder/quoted \"repo\" 🐴")
+        let firstWorkspace = try LaunchWorkspace.create(for: selectedFolder, displayName: "Selected repo", parent: workspaceParent)
+        let secondWorkspace = try LaunchWorkspace.create(for: selectedFolder, displayName: "Selected repo", parent: workspaceParent)
+        precondition(firstWorkspace != secondWorkspace, "Repeated launches must have distinct VS Code identities")
+        for workspace in [firstWorkspace, secondWorkspace] {
+            precondition(workspace.pathExtension == "code-workspace")
+            let object = try JSONSerialization.jsonObject(with: Data(contentsOf: workspace)) as! [String: Any]
+            let folders = object["folders"] as! [[String: String]]
+            precondition(folders == [["path": selectedFolder.path, "name": "Selected repo"]])
+        }
         let repo = root.appendingPathComponent("old-owner/mobli")
         try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
         func git(_ args: [String]) throws {
