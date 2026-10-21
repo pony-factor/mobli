@@ -8,9 +8,17 @@
 		<data>
 		Nfk8H0mnBn8ufwzSSDi29iHRv2c=
 		</data>
+		<key>Resources/Fonts/Montserrat-Bold.ttf</key>
+		<data>
+		i2E3cBMPV0EmB9+jNRQYbr+jQxQ=
+		</data>
+		<key>Resources/Fonts/OFL.txt</key>
+		<data>
+		Mq/88sDjlv4HPIniSs8+79UznVU=
+		</data>
 		<key>Resources/auto-update.sh</key>
 		<data>
-		fpZgJN+WrszD9jHnCQ8kXPFGM/w=
+		ubxwW8htmIQlcAKbREjywBjinWU=
 		</data>
 		<key>Resources/source-root.txt</key>
 		<data>
@@ -26,11 +34,25 @@
 			CPqEUfMPz7W+oq5SecRZJT4mWSxZqcM+PDBegagAIuw=
 			</data>
 		</dict>
+		<key>Resources/Fonts/Montserrat-Bold.ttf</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			zugoRRnBB0DfMj5Q2kSNxdGGJWWB6D4gHxqNAz5bGys=
+			</data>
+		</dict>
+		<key>Resources/Fonts/OFL.txt</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			xUlX1V58nmbCjkdM053nXcBE6PaQVniMrkTreIQc7vE=
+			</data>
+		</dict>
 		<key>Resources/auto-update.sh</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			5l6hxJ2pfeDbNWNdUoZysJZhu9VQDYnUC6bzdx7YJVg=
+			FHBETfWsTOfR3lKzvCzDqi2vDWs4pg8vgY1c26xny6o=
 			</data>
 		</dict>
 		<key>Resources/source-root.txt</key>

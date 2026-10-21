@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>ATSApplicationFontsPath</key>
+	<string>Fonts/</string>
 	<key>CFBundleExecutable</key>
 	<string>RepositoryLauncher</string>
 	<key>CFBundleIconFile</key>
@@ -19,9 +21,9 @@
 	<key>LauncherSourceClean</key>
 	<string>true</string>
 	<key>LauncherSourceFingerprint</key>
-	<string>6ccdad2a22f581db6883c217a2b48cafbe070b29e4381d08f56cc636ecd39d3b</string>
+	<string>a1bce730f8d93f60221ad69070d613b9086623e7c485d4e64d3a0d6af6a89cb6</string>
 	<key>LauncherSourceRevision</key>
-	<string>81361dca3be1db2f6b41c6bbd2e63e4eccf83e80</string>
+	<string>40e225015d44d5e58bd4f6e65b4a9b7557cb5a8c</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 </dict>
