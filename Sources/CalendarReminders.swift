@@ -217,11 +217,19 @@ actor CalendarDocumentLoader {
             documents = []
             entries = []
             fetchedAt = nil
+            source = ""
+            zoneID = ""
+            loadedDay = ""
             message = enabled ? "Choose a calendar repository or folder." : "Calendar reminders are off."
             return
         }
         guard requestedZone.isEmpty || TimeZone(identifier: requestedZone) != nil else {
             dismiss()
+            entries = []
+            fetchedAt = nil
+            source = ""
+            zoneID = ""
+            loadedDay = ""
             message = "Unknown time zone. Use an IANA identifier such as America/New_York."
             return
         }
@@ -256,6 +264,9 @@ actor CalendarDocumentLoader {
                 let items = try CalendarDayParsing.entries(documents: result, on: Date(), in: zone)
                 documents = result
                 entries = items
+                if let activeEntry, !items.contains(where: { $0.id == activeEntry.id }) {
+                    dismiss()
+                }
                 fetchedAt = Date()
                 checkedAt = Date()
                 message = items.isEmpty ? "No events scheduled for today." : "\(items.count) event(s) scheduled for today."
