@@ -214,7 +214,7 @@ actor CalendarDocumentLoader {
         let requestedZone = (defaults.string(forKey: Self.zoneKey) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard enabled, !requestedSource.isEmpty else {
             dismiss()
-            documents = []
+            documents = [:]
             entries = []
             fetchedAt = nil
             source = ""
@@ -237,7 +237,7 @@ actor CalendarDocumentLoader {
         let day = CalendarDayParsing.dayKey(Date(), in: zone)
         if source != requestedSource || zoneID != requestedZone || loadedDay != day {
             dismiss()
-            documents = []
+            documents = [:]
             entries = []
             fetchedAt = nil
             source = requestedSource
