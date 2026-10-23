@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Prepare updates without replacing the running executable. Install only on quit.
+# Prepare in the background; install on quit or recover a pending update on launch.
 set -eu
 mode=$1
 app_path=$2
@@ -8,13 +8,37 @@ cache_root=$4
 mkdir -p "$cache_root"
 ready="$cache_root/ready.app"
 plist_value() { /usr/libexec/PlistBuddy -c "Print :$2" "$1/Contents/Info.plist" 2>/dev/null || true; }
-if [[ "$mode" == install ]]; then
+if [[ "$mode" == relaunch ]]; then
+  # Wait for this exact launcher process to exit before opening its replacement.
+  while /bin/kill -0 "$5" 2>/dev/null; do /bin/sleep 0.1; done
+  exec /usr/bin/open -n "$app_path"
+fi
+[[ "$mode" == prepare || "$mode" == install || "$mode" == startup ]] || exit 1
+# A preparation can outlive the app that started it. Serialize all cache and
+# bundle mutations across sessions; shlock also recovers locks of dead processes.
+lock="$cache_root/update.lock"
+until /usr/bin/shlock -f "$lock" -p $$; do
+  [[ "$mode" == startup ]] || exit 0
+  /bin/sleep 0.1
+done
+work=""
+replacement=""
+trap '[[ -z "$work" ]] || rm -rf "$work"; [[ -z "$replacement" ]] || rm -rf "$replacement"; rm -f "$lock"' EXIT
+if [[ "$mode" == install || "$mode" == startup ]]; then
   [[ -d "$ready" ]] || exit 0
+  # A queued local build may have become stale while the launcher was closed.
+  if [[ -f "$cache_root/ready-local-fingerprint" && -f "$source_root/scripts/source-fingerprint.sh" ]]; then
+    current=$(/bin/zsh "$source_root/scripts/source-fingerprint.sh" "$source_root")
+    if [[ "$(<"$cache_root/ready-local-fingerprint")" != "$current" ]]; then
+      rm -rf "$ready"
+      rm -f "$cache_root/ready-local-fingerprint"
+      exit 0
+    fi
+  fi
   /usr/bin/codesign --verify --deep --strict "$ready"
   [[ "$(plist_value "$ready" CFBundleIdentifier)" == studio.repository-launcher ]] || exit 1
   # Copy to the same filesystem before swapping; retain the old app if the swap fails.
   replacement=$(mktemp -d "${app_path:h}/.launcher-update.XXXXXX")
-  trap 'rm -rf "$replacement"' EXIT
   /usr/bin/ditto "$ready" "$replacement/new.app"
   /usr/bin/codesign --verify --deep --strict "$replacement/new.app"
   if [[ -f "$source_root/scripts/source-fingerprint.sh" ]]; then
@@ -34,7 +58,6 @@ if [[ "$mode" == install ]]; then
 fi
 [[ "$mode" == prepare ]] || exit 1
 work=$(mktemp -d "$cache_root/check.XXXXXX")
-trap 'rm -rf "$work"' EXIT
 installed=$(plist_value "$app_path" LauncherSourceFingerprint)
 if [[ -f "$source_root/scripts/source-fingerprint.sh" ]]; then
   current=$(/bin/zsh "$source_root/scripts/source-fingerprint.sh" "$source_root")

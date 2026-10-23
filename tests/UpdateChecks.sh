@@ -30,6 +30,28 @@ run_update install
 [[ ! -d "$fixture/cache/ready.app" ]]
 [[ "$(fingerprint "$app")" == "$updated" ]]
 codesign --verify --deep --strict "$app"
+# A build finishing after quit must be consumed on the next startup. Startup
+# waits for the previous updater instead of racing its cache/bundle writes.
+ditto "$app" "$fixture/cache/ready.app"
+/usr/bin/shlock -f "$fixture/cache/update.lock" -p $$
+run_update startup &
+startup_pid=$!
+/bin/sleep 0.2
+/bin/kill -0 "$startup_pid"
+[[ -d "$fixture/cache/ready.app" ]]
+rm "$fixture/cache/update.lock"
+wait "$startup_pid"
+[[ ! -d "$fixture/cache/ready.app" ]]
+[[ ! -f "$fixture/cache/update.lock" ]]
+[[ "$(fingerprint "$app")" == "$updated" ]]
+# Recover locks left by an updater that died, and reject obsolete local builds.
+print '2147483647' > "$fixture/cache/update.lock"
+ditto "$app" "$fixture/cache/ready.app"
+print 'obsolete-local-build' > "$fixture/cache/ready-local-fingerprint"
+run_update startup
+[[ ! -d "$fixture/cache/ready.app" ]]
+[[ ! -f "$fixture/cache/update.lock" ]]
+[[ "$(fingerprint "$app")" == "$updated" ]]
 # Simulate an older checkout beside a newly installed published app. It must
 # stay unchanged until the local source actually changes again.
 ditto "$repo_dir/Sources/Activity.swift" "$fixture/source/Sources/Activity.swift"
@@ -46,4 +68,4 @@ if run_update install; then
 fi
 [[ "$(fingerprint "$app")" == "$updated" ]]
 codesign --verify --deep --strict "$app"
-print 'Automatic update preparation, quit installation, downgrade protection, and failed-update preservation passed'
+print 'Automatic update preparation, quit/startup installation, cross-session locking, stale-build rejection, downgrade protection, and failed-update preservation passed'

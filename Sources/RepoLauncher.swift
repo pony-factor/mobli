@@ -2442,6 +2442,8 @@ struct LauncherView: View {
 @MainActor final class LauncherAutoUpdater {
     private var timer: Timer?
     private var preparing: Process?
+    private var restarting = false
+    private let loadedFingerprint = Bundle.main.object(forInfoDictionaryKey: "LauncherSourceFingerprint") as? String
     private let appURL = Bundle.main.bundleURL.resolvingSymlinksInPath()
     private var cacheURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -2472,10 +2474,44 @@ struct LauncherView: View {
         return task
     }
     func start() {
-        check()
-        timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.check() }
+        // Recover updates completed after the previous session quit. Installing
+        // on disk alone does not change the executable already loaded in memory.
+        guard let task = process("startup") else { return }
+        preparing = task
+        task.terminationHandler = { [weak self] process in
+            Task { @MainActor in
+                guard let self else { return }
+                self.preparing = nil
+                if process.terminationStatus == 0, self.installedBuildChanged(), self.relaunch() { return }
+                self.check()
+            }
         }
+        do { try task.run() } catch { preparing = nil; check() }
+        timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                if self.installedBuildChanged(), self.relaunch() { return }
+                self.check()
+            }
+        }
+    }
+    private func installedBuildChanged() -> Bool {
+        guard let loadedFingerprint,
+              let data = try? Data(contentsOf: appURL.appendingPathComponent("Contents/Info.plist")),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let installed = plist["LauncherSourceFingerprint"] as? String else { return false }
+        return installed != loadedFingerprint
+    }
+    private func relaunch() -> Bool {
+        guard !restarting, preparing == nil, let task = process("relaunch") else { return false }
+        task.arguments?.append(String(ProcessInfo.processInfo.processIdentifier))
+        do {
+            try task.run()
+            restarting = true
+            timer?.invalidate()
+            NSApplication.shared.terminate(nil)
+            return true
+        } catch { return false }
     }
     private func check() {
         guard preparing == nil, let task = process("prepare") else { return }
@@ -2489,7 +2525,7 @@ struct LauncherView: View {
         timer?.invalidate()
         // Do not make quitting wait for a network request or compilation. A
         // build still preparing remains available for the next session.
-        guard preparing == nil,
+        guard !restarting, preparing == nil,
               FileManager.default.fileExists(atPath: cacheURL.appendingPathComponent("ready.app").path),
               let task = process("install") else { return .terminateNow }
         task.terminationHandler = { _ in
