@@ -11,6 +11,9 @@ done
 # Both architectures must embed the classic-era Montserrat fallback and its license.
 cmp "$repo_dir/Assets/Fonts/Montserrat-Bold.ttf" "$installed_app/Contents/Resources/Fonts/Montserrat-Bold.ttf"
 cmp "$repo_dir/Assets/Fonts/OFL.txt" "$installed_app/Contents/Resources/Fonts/OFL.txt"
+for weight in Regular Medium SemiBold; do
+  cmp "$repo_dir/Assets/Fonts/Montserrat-$weight.otf" "$installed_app/Contents/Resources/Fonts/Montserrat-$weight.otf"
+done
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :ATSApplicationFontsPath' "$installed_app/Contents/Info.plist")" == "Fonts/" ]]
 app="$fixture/Installed.app"
 ditto "$installed_app" "$app"

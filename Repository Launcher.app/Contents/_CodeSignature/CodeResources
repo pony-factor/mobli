@@ -12,6 +12,18 @@
 		<data>
 		i2E3cBMPV0EmB9+jNRQYbr+jQxQ=
 		</data>
+		<key>Resources/Fonts/Montserrat-Medium.otf</key>
+		<data>
+		W/MJ38roWwNp2O3bcfbEKRWI/6c=
+		</data>
+		<key>Resources/Fonts/Montserrat-Regular.otf</key>
+		<data>
+		3vJ09rTbhLJ6h+jdo3VGORUWjdE=
+		</data>
+		<key>Resources/Fonts/Montserrat-SemiBold.otf</key>
+		<data>
+		W/yISwN+fhUBt6cKvbFjmoETYI4=
+		</data>
 		<key>Resources/Fonts/OFL.txt</key>
 		<data>
 		Mq/88sDjlv4HPIniSs8+79UznVU=
@@ -39,6 +51,27 @@
 			<key>hash2</key>
 			<data>
 			zugoRRnBB0DfMj5Q2kSNxdGGJWWB6D4gHxqNAz5bGys=
+			</data>
+		</dict>
+		<key>Resources/Fonts/Montserrat-Medium.otf</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			BSvim2MCzdQsOuyFVWF6YdMs7qAugNhEcEnmn2FKQMs=
+			</data>
+		</dict>
+		<key>Resources/Fonts/Montserrat-Regular.otf</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			U3RTA2hFrzthTx+D91qtKr7nlERMvngOZs8PKvmQ4w8=
+			</data>
+		</dict>
+		<key>Resources/Fonts/Montserrat-SemiBold.otf</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			zdnBjVLZt9ZrCcF1jom/1nNkNanF2c8M7F/NuvXUbMQ=
 			</data>
 		</dict>
 		<key>Resources/Fonts/OFL.txt</key>

@@ -1270,21 +1270,38 @@ struct RepositoryRow: View {
     }
 }
 
-// Keep the requested classic bold face on headings only; other UI text stays native.
+enum HeadingWeight: String, CaseIterable, Identifiable {
+    case regular, medium, semibold, bold
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+    var fontSuffix: String { self == .semibold ? "SemiBold" : title }
+    var systemWeight: Font.Weight {
+        switch self {
+        case .regular: return .regular
+        case .medium: return .medium
+        case .semibold: return .semibold
+        case .bold: return .bold
+        }
+    }
+}
+
+// Apply the saved weight to pinned titles and owner headings only.
 enum HeadingTypography {
-    static func classicBold(size: CGFloat) -> Font {
-        // Canva's "Montserrat Classic" is not supplied as a redistributable face.
-        // Prefer it when present locally; otherwise use the bundled original Montserrat Bold.
-        for name in ["MontserratClassic-Bold", "Montserrat Classic Bold", "Montserrat-Bold"] {
+    static let weightKey = "studio.repository-launcher.heading-weight"
+
+    static func font(size: CGFloat, weight: HeadingWeight) -> Font {
+        let suffix = weight.fontSuffix
+        for name in ["MontserratClassic-\(suffix)", "Montserrat Classic \(suffix)", "Montserrat-\(suffix)"] {
             if NSFont(name: name, size: size) != nil {
                 return .custom(name, size: size)
             }
         }
-        return .system(size: size, weight: .bold)
+        return .system(size: size, weight: weight.systemWeight)
     }
 }
 
 struct PinnedRepositoryItem: View {
+    @AppStorage(HeadingTypography.weightKey) private var headingWeight: HeadingWeight = .semibold
     static let width: CGFloat = 260
     static let height: CGFloat = 60
 
@@ -1309,7 +1326,7 @@ struct PinnedRepositoryItem: View {
                             .clipShape(RoundedRectangle(cornerRadius: 5))
                     }
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(repo.name).font(HeadingTypography.classicBold(size: 16)).lineLimit(1)
+                        Text(repo.name).font(HeadingTypography.font(size: 16, weight: headingWeight)).lineLimit(1)
                             .background(SecondaryClickRegion {
                                 if let url = repo.githubURL { NSWorkspace.shared.open(url) }
                             })
@@ -1344,6 +1361,7 @@ struct PinnedRepositoryItem: View {
 }
 
 struct OwnerHeader: View {
+    @AppStorage(HeadingTypography.weightKey) private var headingWeight: HeadingWeight = .semibold
     let owner: String
     let profile: OwnerProfile?
     let subtitle: String?
@@ -1365,7 +1383,7 @@ struct OwnerHeader: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             VStack(alignment: .leading, spacing: 3) {
-                Text(displayTitle).font(HeadingTypography.classicBold(size: 16)).lineLimit(2)
+                Text(displayTitle).font(HeadingTypography.font(size: 16, weight: headingWeight)).lineLimit(2)
                 if showOwnerSlugs, displayTitle != owner {
                     Text(owner).font(.system(size: 12)).foregroundStyle(Palette.muted)
                 }
@@ -1750,6 +1768,7 @@ struct LauncherView: View {
     @AppStorage(Palette.accentKey) private var themeAccent = Palette.defaultAccent
     @AppStorage(Palette.textKey) private var themeText = Palette.defaultText
     @AppStorage(Palette.mutedKey) private var themeMuted = Palette.defaultMuted
+    @AppStorage(HeadingTypography.weightKey) private var headingWeight: HeadingWeight = .semibold
     @State private var addingOrganization = false
     @State private var newOrganization = ""
     @State private var addOrganizationError: String?
@@ -2203,6 +2222,15 @@ struct LauncherView: View {
             themeColorRow("Accent", value: $themeAccent, defaultHex: Palette.defaultAccent)
             themeColorRow("Primary text", value: $themeText, defaultHex: Palette.defaultText)
             themeColorRow("Muted text", value: $themeMuted, defaultHex: Palette.defaultMuted)
+            Divider().overlay(Color.white.opacity(0.08))
+            Picker("Heading weight", selection: $headingWeight) {
+                ForEach(HeadingWeight.allCases) { weight in
+                    Text(weight.title).tag(weight)
+                }
+            }
+            Text("Applies to organization headings and pinned repository titles.")
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
         }
     }
 
