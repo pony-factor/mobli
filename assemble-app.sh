@@ -11,6 +11,9 @@ cmp "$arm_app/Contents/Info.plist" "$intel_app/Contents/Info.plist"
 cmp "$arm_app/Contents/Resources/AppIcon.icns" "$intel_app/Contents/Resources/AppIcon.icns"
 cmp "$arm_app/Contents/Resources/Fonts/Montserrat-Bold.ttf" "$intel_app/Contents/Resources/Fonts/Montserrat-Bold.ttf"
 cmp "$arm_app/Contents/Resources/Fonts/OFL.txt" "$intel_app/Contents/Resources/Fonts/OFL.txt"
+for weight in Regular Medium SemiBold; do
+  cmp "$arm_app/Contents/Resources/Fonts/Montserrat-$weight.otf" "$intel_app/Contents/Resources/Fonts/Montserrat-$weight.otf"
+done
 
 assembly_dir=$(mktemp -d /tmp/mobli-universal.XXXXXX)
 trap 'rm -rf "$assembly_dir"' EXIT

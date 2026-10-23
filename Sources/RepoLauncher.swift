@@ -1270,21 +1270,38 @@ struct RepositoryRow: View {
     }
 }
 
-// Keep the requested classic bold face on headings only; other UI text stays native.
+enum HeadingWeight: String, CaseIterable, Identifiable {
+    case regular, medium, semibold, bold
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+    var fontSuffix: String { self == .semibold ? "SemiBold" : title }
+    var systemWeight: Font.Weight {
+        switch self {
+        case .regular: return .regular
+        case .medium: return .medium
+        case .semibold: return .semibold
+        case .bold: return .bold
+        }
+    }
+}
+
+// Apply the saved weight to pinned titles and owner headings only.
 enum HeadingTypography {
-    static func classicBold(size: CGFloat) -> Font {
-        // Canva's "Montserrat Classic" is not supplied as a redistributable face.
-        // Prefer it when present locally; otherwise use the bundled original Montserrat Bold.
-        for name in ["MontserratClassic-Bold", "Montserrat Classic Bold", "Montserrat-Bold"] {
+    static let weightKey = "studio.repository-launcher.heading-weight"
+
+    static func font(size: CGFloat, weight: HeadingWeight) -> Font {
+        let suffix = weight.fontSuffix
+        for name in ["MontserratClassic-\(suffix)", "Montserrat Classic \(suffix)", "Montserrat-\(suffix)"] {
             if NSFont(name: name, size: size) != nil {
                 return .custom(name, size: size)
             }
         }
-        return .system(size: size, weight: .bold)
+        return .system(size: size, weight: weight.systemWeight)
     }
 }
 
 struct PinnedRepositoryItem: View {
+    @AppStorage(HeadingTypography.weightKey) private var headingWeight: HeadingWeight = .semibold
     static let width: CGFloat = 260
     static let height: CGFloat = 60
 
@@ -1309,7 +1326,7 @@ struct PinnedRepositoryItem: View {
                             .clipShape(RoundedRectangle(cornerRadius: 5))
                     }
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(repo.name).font(HeadingTypography.classicBold(size: 16)).lineLimit(1)
+                        Text(repo.name).font(HeadingTypography.font(size: 16, weight: headingWeight)).lineLimit(1)
                             .background(SecondaryClickRegion {
                                 if let url = repo.githubURL { NSWorkspace.shared.open(url) }
                             })
@@ -1344,6 +1361,7 @@ struct PinnedRepositoryItem: View {
 }
 
 struct OwnerHeader: View {
+    @AppStorage(HeadingTypography.weightKey) private var headingWeight: HeadingWeight = .semibold
     let owner: String
     let profile: OwnerProfile?
     let subtitle: String?
@@ -1365,7 +1383,7 @@ struct OwnerHeader: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             VStack(alignment: .leading, spacing: 3) {
-                Text(displayTitle).font(HeadingTypography.classicBold(size: 16)).lineLimit(2)
+                Text(displayTitle).font(HeadingTypography.font(size: 16, weight: headingWeight)).lineLimit(2)
                 if showOwnerSlugs, displayTitle != owner {
                     Text(owner).font(.system(size: 12)).foregroundStyle(Palette.muted)
                 }
@@ -1750,6 +1768,7 @@ struct LauncherView: View {
     @AppStorage(Palette.accentKey) private var themeAccent = Palette.defaultAccent
     @AppStorage(Palette.textKey) private var themeText = Palette.defaultText
     @AppStorage(Palette.mutedKey) private var themeMuted = Palette.defaultMuted
+    @AppStorage(HeadingTypography.weightKey) private var headingWeight: HeadingWeight = .semibold
     @State private var addingOrganization = false
     @State private var newOrganization = ""
     @State private var addOrganizationError: String?
@@ -2203,6 +2222,15 @@ struct LauncherView: View {
             themeColorRow("Accent", value: $themeAccent, defaultHex: Palette.defaultAccent)
             themeColorRow("Primary text", value: $themeText, defaultHex: Palette.defaultText)
             themeColorRow("Muted text", value: $themeMuted, defaultHex: Palette.defaultMuted)
+            Divider().overlay(Color.white.opacity(0.08))
+            Picker("Heading weight", selection: $headingWeight) {
+                ForEach(HeadingWeight.allCases) { weight in
+                    Text(weight.title).tag(weight)
+                }
+            }
+            Text("Applies to organization headings and pinned repository titles.")
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
         }
     }
 
@@ -2442,6 +2470,8 @@ struct LauncherView: View {
 @MainActor final class LauncherAutoUpdater {
     private var timer: Timer?
     private var preparing: Process?
+    private var restarting = false
+    private let loadedFingerprint = Bundle.main.object(forInfoDictionaryKey: "LauncherSourceFingerprint") as? String
     private let appURL = Bundle.main.bundleURL.resolvingSymlinksInPath()
     private var cacheURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -2472,10 +2502,44 @@ struct LauncherView: View {
         return task
     }
     func start() {
-        check()
-        timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.check() }
+        // Recover updates completed after the previous session quit. Installing
+        // on disk alone does not change the executable already loaded in memory.
+        guard let task = process("startup") else { return }
+        preparing = task
+        task.terminationHandler = { [weak self] process in
+            Task { @MainActor in
+                guard let self else { return }
+                self.preparing = nil
+                if process.terminationStatus == 0, self.installedBuildChanged(), self.relaunch() { return }
+                self.check()
+            }
         }
+        do { try task.run() } catch { preparing = nil; check() }
+        timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                if self.installedBuildChanged(), self.relaunch() { return }
+                self.check()
+            }
+        }
+    }
+    private func installedBuildChanged() -> Bool {
+        guard let loadedFingerprint,
+              let data = try? Data(contentsOf: appURL.appendingPathComponent("Contents/Info.plist")),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let installed = plist["LauncherSourceFingerprint"] as? String else { return false }
+        return installed != loadedFingerprint
+    }
+    private func relaunch() -> Bool {
+        guard !restarting, preparing == nil, let task = process("relaunch") else { return false }
+        task.arguments?.append(String(ProcessInfo.processInfo.processIdentifier))
+        do {
+            try task.run()
+            restarting = true
+            timer?.invalidate()
+            NSApplication.shared.terminate(nil)
+            return true
+        } catch { return false }
     }
     private func check() {
         guard preparing == nil, let task = process("prepare") else { return }
@@ -2489,7 +2553,7 @@ struct LauncherView: View {
         timer?.invalidate()
         // Do not make quitting wait for a network request or compilation. A
         // build still preparing remains available for the next session.
-        guard preparing == nil,
+        guard !restarting, preparing == nil,
               FileManager.default.fileExists(atPath: cacheURL.appendingPathComponent("ready.app").path),
               let task = process("install") else { return .terminateNow }
         task.terminationHandler = { _ in

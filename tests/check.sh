@@ -10,10 +10,11 @@ import sys
 repo = Path(sys.argv[1])
 source = (repo / "Sources/RepoLauncher.swift").read_text()
 assert "enum HeadingTypography" in source
-assert '["MontserratClassic-Bold", "Montserrat Classic Bold", "Montserrat-Bold"]' in source
-assert source.count(".font(HeadingTypography.classicBold(size: 16))") == 2
-assert "Text(repo.name).font(HeadingTypography.classicBold(size: 16))" in source
-assert "Text(displayTitle).font(HeadingTypography.classicBold(size: 16))" in source
+assert source.count(".font(HeadingTypography.font(size: 16, weight: headingWeight))") == 2
+assert source.count("private var headingWeight: HeadingWeight = .semibold") == 3
+assert 'Picker("Heading weight", selection: $headingWeight)' in source
+for weight in ("Regular", "Medium", "SemiBold"):
+    assert (repo / f"Assets/Fonts/Montserrat-{weight}.otf").stat().st_size > 10_000
 build = (repo / "build-app.sh").read_text()
 assert '<key>ATSApplicationFontsPath</key><string>Fonts/</string>' in build
 assert "Assets/Fonts/Montserrat-Bold.ttf" in build and "Assets/Fonts/OFL.txt" in build
