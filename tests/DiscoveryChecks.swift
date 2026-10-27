@@ -51,6 +51,23 @@ import Foundation
         precondition(deduplicated.contains { $0.id == linkedWorktree.id && $0.isWorktree })
         precondition(linkedWorktree.fullName == "org-a/shared")
         precondition(linkedWorktree.worktreeDetail == "Worktree · shared-worktree")
+        let primaryLinkedCheckout = Repository(
+            url: URL(fileURLWithPath: NSHomeDirectory() + "/GitHub/org-a/shared"),
+            owner: "org-a", lastActivityAt: sameActivity, githubName: "shared",
+            gitCommonDirectory: URL(fileURLWithPath: "/tmp/shared-git-data")
+        )
+        precondition(!primaryLinkedCheckout.isWorktree)
+        precondition(primaryLinkedCheckout.worktreeDetail == nil)
+        let cachedPrimary = try JSONDecoder().decode(
+            Repository.self, from: JSONEncoder().encode(primaryLinkedCheckout)
+        )
+        precondition(!cachedPrimary.isWorktree)
+        let primaryRoot = URL(fileURLWithPath: NSHomeDirectory() + "/GitHub")
+        let primaryDeduplicated = Discovery.deduplicatedLocal(
+            [duplicateCheckout, linkedWorktree, primaryLinkedCheckout], root: primaryRoot
+        )
+        precondition(primaryDeduplicated.count == 2)
+        precondition(primaryDeduplicated.contains { $0.id == primaryLinkedCheckout.id })
         precondition(
             RepositoryRanking.ranked([linkedWorktree, canonicalCheckout], usage: [:],
                                      pinned: [canonicalCheckout.usageKey]).first?.id == canonicalCheckout.id
