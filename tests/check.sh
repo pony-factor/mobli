@@ -91,7 +91,7 @@ xcrun swiftc -parse-as-library "$check_dir/Activity.swift" "$repo_dir/tests/Acti
 xcrun swiftc -parse-as-library "$check_dir/StreamModel.swift" "$repo_dir/tests/StreamChecks.swift" -o "$check_dir/stream-checks"
 "$check_dir/stream-checks"
 
-xcrun swiftc -parse-as-library "$check_dir/Discovery.swift" "$repo_dir/tests/DiscoveryChecks.swift" -o "$check_dir/discovery-checks"
+xcrun swiftc -parse-as-library "$check_dir/Discovery.swift" "$repo_dir/Sources/RepositoryRename.swift" "$repo_dir/tests/DiscoveryChecks.swift" -o "$check_dir/discovery-checks"
 "$check_dir/discovery-checks"
 
 xcrun swiftc -parse-as-library "$check_dir/OwnerOrder.swift" "$repo_dir/tests/OwnerOrderChecks.swift" -o "$check_dir/owner-order-checks"
@@ -100,7 +100,7 @@ xcrun swiftc -parse-as-library "$check_dir/OwnerOrder.swift" "$repo_dir/tests/Ow
 xcrun swiftc -parse-as-library "$check_dir/Agenda.swift" "$repo_dir/tests/AgendaChecks.swift" -o "$check_dir/agenda-checks"
 "$check_dir/agenda-checks"
 
-xcrun swiftc -parse-as-library "$check_dir/PinPlacement.swift" "$repo_dir/tests/PinPlacementChecks.swift" -o "$check_dir/pin-placement-checks"
+xcrun swiftc -parse-as-library "$check_dir/PinPlacement.swift" "$repo_dir/Sources/RepositoryRename.swift" "$repo_dir/tests/PinPlacementChecks.swift" -o "$check_dir/pin-placement-checks"
 "$check_dir/pin-placement-checks"
 
 xcrun swiftc -parse-as-library "$check_dir/AgendaAPI.swift" "$repo_dir/tests/AgendaWriteChecks.swift" -o "$check_dir/agenda-api-checks" -framework AppKit
