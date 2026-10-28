@@ -215,10 +215,11 @@ import Foundation
             preconditionFailure("Occupied destinations must be rejected")
         } catch { precondition(FileManager.default.fileExists(atPath: previous.path)) }
         try FileManager.default.removeItem(at: replacement)
-        precondition(try RepositoryRename.perform(change, root: renameRoot))
+        let moved = try RepositoryRename.perform(change, root: renameRoot)
+        precondition(moved)
         precondition(!FileManager.default.fileExists(atPath: previous.path))
-        precondition(try String(contentsOf: replacement.appendingPathComponent("untracked.txt"),
-                                encoding: .utf8) == "keep local edits")
+        let untracked = try String(contentsOf: replacement.appendingPathComponent("untracked.txt"), encoding: .utf8)
+        precondition(untracked == "keep local edits")
         let renamedDiscovery = try Discovery.scan(renameRoot)
         precondition(renamedDiscovery.count == 1 && renamedDiscovery[0].name == "new-name")
         precondition(renamedDiscovery[0].githubName == "new-name")
