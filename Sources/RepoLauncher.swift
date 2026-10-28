@@ -36,7 +36,7 @@ struct Repository: Identifiable, Codable, Sendable {
         return components.url
     }
     var isWorktree: Bool { isLocal && gitCommonDirectory != nil }
-    var displayName: String { isWorktree ? repositoryName : name }
+    var displayName: String { githubID != nil && repositoryName != name ? repositoryName : (isWorktree ? repositoryName : name) }
     var worktreeDetail: String? {
         guard isWorktree else { return nil }
         return name.caseInsensitiveCompare(repositoryName) == .orderedSame ? "Worktree" : "Worktree · " + name
@@ -200,6 +200,26 @@ enum Discovery {
     static func merged(local: [Repository], remote: [Repository]) -> [Repository] {
         let localKeys = Set(local.map(\.usageKey))
         return local + remote.filter { !localKeys.contains($0.usageKey) }
+    }
+
+    // A verified GitHub ID takes priority over a stale origin slug. If the clone
+    // cannot be moved, retain its actual local path but show the canonical name
+    // and suppress the duplicate cloud-only entry.
+    static func reconciled(local: [Repository], remote: [Repository],
+                           aliases: [String: Repository]) -> [Repository] {
+        let normalized = local.map { repository -> Repository in
+            guard let canonical = aliases[repository.id], repository.isLocal,
+                  !canonical.isLocal, canonical.githubID != nil,
+                  repository.owner.caseInsensitiveCompare(canonical.owner) == .orderedSame else {
+                return repository
+            }
+            return Repository(url: repository.url, owner: repository.owner,
+                              lastActivityAt: repository.lastActivityAt,
+                              githubName: canonical.repositoryName,
+                              gitCommonDirectory: repository.gitCommonDirectory,
+                              githubID: canonical.githubID)
+        }
+        return merged(local: normalized, remote: remote)
     }
 }
 
@@ -695,11 +715,10 @@ actor GitHubRepositoryCatalog {
         let catalog = Dictionary(uniqueKeysWithValues: remote.compactMap { item in
             item.githubID.map { ($0, item) }
         })
-        let visibleKeys = Set(remote.map(\\.usageKey))
+        let visibleKeys = Set(remote.map(\.usageKey))
         var results: [RepositoryRename.Change] = []
-        for localRepo in local where localRepo.isLocal && !localRepo.isWorktree &&
-            !visibleKeys.contains(localRepo.usageKey) && localRepo.owner != "Local" &&
-            localRepo.name.caseInsensitiveCompare(localRepo.repositoryName) == .orderedSame {
+        for localRepo in local where localRepo.isLocal &&
+            !visibleKeys.contains(localRepo.usageKey) && localRepo.owner != "Local" {
             guard let canonical = await canonicalRepository(localRepo),
                   let current = catalog[canonical.id],
                   canonical.owner.login.caseInsensitiveCompare(current.owner) == .orderedSame,
@@ -951,9 +970,15 @@ enum OwnerOrdering {
         do {
             let scanRoot = root
             let local = try await Task.detached { try Discovery.scan(scanRoot) }.value
-            // Publish local changes without waiting for GitHub; retain the last remote catalog.
+            // Preserve previously confirmed aliases while a remote refresh is cached.
+            // Repository discovery itself must never guess that a rename happened.
+            let previousAliases = Dictionary(uniqueKeysWithValues: repos.compactMap { repository -> (String, Repository)? in
+                guard repository.isLocal, repository.githubID != nil,
+                      repository.name.caseInsensitiveCompare(repository.repositoryName) != .orderedSame else { return nil }
+                return (repository.id, repository)
+            })
             let cachedRemote = repos.filter { !$0.isLocal }
-            repos = Discovery.merged(local: local, remote: cachedRemote)
+            repos = Discovery.reconciled(local: local, remote: cachedRemote, aliases: previousAliases)
             loadCachedProfiles(additionalOwners: priorityOwners)
             saveRepositories()
             let recentRemote = remoteRefreshedAt.map { Date().timeIntervalSince($0) < 5 * 60 } ?? false
@@ -962,22 +987,29 @@ enum OwnerOrdering {
                 do {
                     let remote = try await remoteCatalog.repositories(root: scanRoot, priorityOwners: priorityOwners)
                     let changes = await remoteCatalog.renamedRepositories(local: local, remote: remote)
-                    var migrated: [String: String] = [:]
+                    let canonicalAliases = Dictionary(uniqueKeysWithValues: changes.map {
+                        ($0.local.id, $0.remote)
+                    })
+                    let migrated = changes.filter { !$0.local.isWorktree }.reduce(into: [String: String]()) { keys, change in
+                        keys[change.local.usageKey] = change.remote.usageKey
+                    }
+                    var movedAny = false
                     var warnings: [String] = []
                     for change in changes {
                         do {
                             let moved = try await Task.detached(priority: .utility) {
                                 try RepositoryRename.perform(change, root: scanRoot)
                             }.value
-                            if moved { migrated[change.local.usageKey] = change.remote.usageKey }
+                            if moved { movedAny = true }
                         } catch {
                             warnings.append("\(change.local.fullName): \(error.localizedDescription)")
                         }
                     }
-                    let currentLocal = migrated.isEmpty ? local : try await Task.detached {
+                    let currentLocal = movedAny ? try await Task.detached {
                         try Discovery.scan(scanRoot)
-                    }.value
-                    repos = Discovery.merged(local: currentLocal, remote: remote)
+                    }.value : local
+                    repos = Discovery.reconciled(local: currentLocal, remote: remote,
+                                                 aliases: canonicalAliases)
                     if !migrated.isEmpty { renamedKeys = migrated }
                     if let organizations = try? await remoteCatalog.organizations() {
                         githubOrganizations = organizations

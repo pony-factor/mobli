@@ -201,6 +201,17 @@ import Foundation
                                   cloneURL: URL(string: "https://github.com/pony-factor/new-name.git"),
                                   githubName: "new-name", githubID: 42)
         let change = RepositoryRename.Change(local: localOld, remote: githubNew)
+        // A name-only merge incorrectly shows the old clone and new cloud row.
+        precondition(Discovery.merged(local: [localOld], remote: [githubNew]).count == 2)
+        let recognized = Discovery.reconciled(local: [localOld], remote: [githubNew],
+                                              aliases: [localOld.id: githubNew])
+        precondition(recognized.count == 1 && recognized[0].isLocal)
+        precondition(recognized[0].url == previous)
+        precondition(recognized[0].usageKey == githubNew.usageKey)
+        precondition(recognized[0].displayName == "new-name")
+        // No GitHub identity confirmation means no automatic deduplication.
+        precondition(Discovery.reconciled(local: [localOld], remote: [githubNew],
+                                           aliases: [:]).count == 2)
         precondition(RepositoryRename.updatedOrigin("https://github.com/pony-factor/old-name.git",
             owner: "pony-factor", oldName: "old-name", newName: "new-name")
             == "https://github.com/pony-factor/new-name.git")
@@ -214,6 +225,9 @@ import Foundation
             _ = try RepositoryRename.perform(change, root: renameRoot)
             preconditionFailure("Occupied destinations must be rejected")
         } catch { precondition(FileManager.default.fileExists(atPath: previous.path)) }
+        // Occupied destinations must not reintroduce a phantom cloud repository.
+        precondition(Discovery.reconciled(local: [localOld], remote: [githubNew],
+                                           aliases: [localOld.id: githubNew]).count == 1)
         try FileManager.default.removeItem(at: replacement)
         let moved = try RepositoryRename.perform(change, root: renameRoot)
         precondition(moved)
