@@ -8,15 +8,17 @@ struct Repository: Identifiable, Codable, Sendable {
     let cloneURL: URL?
     let githubName: String?
     let gitCommonDirectory: URL?
+    let githubID: Int64?
 
     init(url: URL, owner: String, lastActivityAt: Date?, cloneURL: URL? = nil,
-         githubName: String? = nil, gitCommonDirectory: URL? = nil) {
+         githubName: String? = nil, gitCommonDirectory: URL? = nil, githubID: Int64? = nil) {
         self.url = url
         self.owner = owner
         self.lastActivityAt = lastActivityAt
         self.cloneURL = cloneURL
         self.githubName = githubName
         self.gitCommonDirectory = gitCommonDirectory
+        self.githubID = githubID
     }
 
     var id: String { url.standardizedFileURL.path }
@@ -34,7 +36,7 @@ struct Repository: Identifiable, Codable, Sendable {
         return components.url
     }
     var isWorktree: Bool { isLocal && gitCommonDirectory != nil }
-    var displayName: String { isWorktree ? repositoryName : name }
+    var displayName: String { githubID != nil && repositoryName != name ? repositoryName : (isWorktree ? repositoryName : name) }
     var worktreeDetail: String? {
         guard isWorktree else { return nil }
         return name.caseInsensitiveCompare(repositoryName) == .orderedSame ? "Worktree" : "Worktree · " + name
@@ -198,6 +200,26 @@ enum Discovery {
     static func merged(local: [Repository], remote: [Repository]) -> [Repository] {
         let localKeys = Set(local.map(\.usageKey))
         return local + remote.filter { !localKeys.contains($0.usageKey) }
+    }
+
+    // A verified GitHub ID takes priority over a stale origin slug. If the clone
+    // cannot be moved, retain its actual local path but show the canonical name
+    // and suppress the duplicate cloud-only entry.
+    static func reconciled(local: [Repository], remote: [Repository],
+                           aliases: [String: Repository]) -> [Repository] {
+        let normalized = local.map { repository -> Repository in
+            guard let canonical = aliases[repository.id], repository.isLocal,
+                  !canonical.isLocal, canonical.githubID != nil,
+                  repository.owner.caseInsensitiveCompare(canonical.owner) == .orderedSame else {
+                return repository
+            }
+            return Repository(url: repository.url, owner: repository.owner,
+                              lastActivityAt: repository.lastActivityAt,
+                              githubName: canonical.repositoryName,
+                              gitCommonDirectory: repository.gitCommonDirectory,
+                              githubID: canonical.githubID)
+        }
+        return merged(local: normalized, remote: remote)
     }
 }
 
@@ -534,6 +556,7 @@ actor GitHubRepositoryCatalog {
         struct Owner: Decodable { let login: String }
         let name: String
         let clone_url: URL
+        let id: Int64
         let pushed_at: String?
         let updated_at: String?
         let owner: Owner
@@ -660,8 +683,53 @@ actor GitHubRepositoryCatalog {
             let destination = root.appendingPathComponent(owner, isDirectory: true)
                 .appendingPathComponent(name, isDirectory: true)
             return Repository(url: destination, owner: owner, lastActivityAt: activity,
-                              cloneURL: repository.clone_url, githubName: name)
+                              cloneURL: repository.clone_url, githubName: name, githubID: repository.id)
         }
+    }
+
+    private func canonicalRepository(_ repository: Repository) async -> RemoteRepository? {
+        guard let executable = GitHubInbox.executable else { return nil }
+        let arguments = [
+            "api", "--hostname", "github.com",
+            "-H", "Accept: application/vnd.github+json",
+            "-H", "X-GitHub-Api-Version: 2022-11-28",
+            "/repos/\(repository.owner)/\(repository.repositoryName)",
+        ]
+        return try? await Task.detached { () throws -> RemoteRepository in
+            let process = Process()
+            let output = Pipe()
+            process.executableURL = URL(fileURLWithPath: executable)
+            process.arguments = arguments
+            process.standardInput = FileHandle.nullDevice
+            process.standardOutput = output
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { throw GitHubRepositoryFailure.request }
+            return try JSONDecoder().decode(RemoteRepository.self, from: data)
+        }.value
+    }
+
+    func renamedRepositories(local: [Repository], remote: [Repository]) async -> [RepositoryRename.Change] {
+        let catalog = Dictionary(uniqueKeysWithValues: remote.compactMap { item in
+            item.githubID.map { ($0, item) }
+        })
+        let visibleKeys = Set(remote.map(\.usageKey))
+        var results: [RepositoryRename.Change] = []
+        for localRepo in local where localRepo.isLocal &&
+            !visibleKeys.contains(localRepo.usageKey) && localRepo.owner != "Local" {
+            guard let canonical = await canonicalRepository(localRepo),
+                  let current = catalog[canonical.id],
+                  canonical.owner.login.caseInsensitiveCompare(current.owner) == .orderedSame,
+                  canonical.name.caseInsensitiveCompare(current.repositoryName) == .orderedSame,
+                  localRepo.owner.caseInsensitiveCompare(current.owner) == .orderedSame,
+                  localRepo.repositoryName.caseInsensitiveCompare(current.repositoryName) != .orderedSame else {
+                continue
+            }
+            results.append(RepositoryRename.Change(local: localRepo, remote: current))
+        }
+        return results
     }
 }
 
@@ -816,6 +884,25 @@ enum OwnerOrdering {
         defaults.set(next, forKey: Self.pinKey)
     }
 
+    func migrate(from oldKey: String, to newKey: String) {
+        guard oldKey != newKey else { return }
+        if let previous = usage.removeValue(forKey: oldKey) {
+            if let current = usage[newKey] {
+                usage[newKey] = RepositoryUsage(opens: current.opens + previous.opens,
+                    lastOpened: [current.lastOpened, previous.lastOpened].compactMap { $0 }.max())
+            } else {
+                usage[newKey] = previous
+            }
+        }
+        var seen = Set<String>()
+        pinnedOrder = pinnedOrder.map { $0 == oldKey ? newKey : $0 }
+            .filter { seen.insert($0).inserted }
+        if columnPins.remove(oldKey) != nil { columnPins.insert(newKey) }
+        defaults.set(pinnedOrder, forKey: Self.pinKey)
+        defaults.set(columnPins.sorted(), forKey: Self.columnPinKey)
+        if let data = try? JSONEncoder().encode(usage) { defaults.set(data, forKey: Self.key) }
+    }
+
     func record(_ repository: Repository) {
         var current = usage[repository.usageKey] ?? RepositoryUsage(opens: 0, lastOpened: nil)
         current.opens += 1
@@ -832,6 +919,7 @@ enum OwnerOrdering {
     @Published var profiles: [String: OwnerProfile] = [:]
     @Published var error: String?
     @Published var githubMessage: String?
+    @Published private(set) var renamedKeys: [String: String] = [:]
     @Published private(set) var githubOrganizations: [String] = []
     @Published private(set) var refreshing = false
     @Published private(set) var cloning = Set<String>()
@@ -882,9 +970,15 @@ enum OwnerOrdering {
         do {
             let scanRoot = root
             let local = try await Task.detached { try Discovery.scan(scanRoot) }.value
-            // Publish local changes without waiting for GitHub; retain the last remote catalog.
+            // Preserve previously confirmed aliases while a remote refresh is cached.
+            // Repository discovery itself must never guess that a rename happened.
+            let previousAliases = Dictionary(uniqueKeysWithValues: repos.compactMap { repository -> (String, Repository)? in
+                guard repository.isLocal, repository.githubID != nil,
+                      repository.name.caseInsensitiveCompare(repository.repositoryName) != .orderedSame else { return nil }
+                return (repository.id, repository)
+            })
             let cachedRemote = repos.filter { !$0.isLocal }
-            repos = Discovery.merged(local: local, remote: cachedRemote)
+            repos = Discovery.reconciled(local: local, remote: cachedRemote, aliases: previousAliases)
             loadCachedProfiles(additionalOwners: priorityOwners)
             saveRepositories()
             let recentRemote = remoteRefreshedAt.map { Date().timeIntervalSince($0) < 5 * 60 } ?? false
@@ -892,7 +986,31 @@ enum OwnerOrdering {
             if forceProfiles || githubOrganizations.isEmpty || !recentRemote || !requestedOwners.isSubset(of: Set(remoteOwners)) {
                 do {
                     let remote = try await remoteCatalog.repositories(root: scanRoot, priorityOwners: priorityOwners)
-                    repos = Discovery.merged(local: local, remote: remote)
+                    let changes = await remoteCatalog.renamedRepositories(local: local, remote: remote)
+                    let canonicalAliases = Dictionary(uniqueKeysWithValues: changes.map {
+                        ($0.local.id, $0.remote)
+                    })
+                    let migrated = changes.filter { !$0.local.isWorktree }.reduce(into: [String: String]()) { keys, change in
+                        keys[change.local.usageKey] = change.remote.usageKey
+                    }
+                    var movedAny = false
+                    var warnings: [String] = []
+                    for change in changes {
+                        do {
+                            let moved = try await Task.detached(priority: .utility) {
+                                try RepositoryRename.perform(change, root: scanRoot)
+                            }.value
+                            if moved { movedAny = true }
+                        } catch {
+                            warnings.append("\(change.local.fullName): \(error.localizedDescription)")
+                        }
+                    }
+                    let currentLocal = movedAny ? try await Task.detached {
+                        try Discovery.scan(scanRoot)
+                    }.value : local
+                    repos = Discovery.reconciled(local: currentLocal, remote: remote,
+                                                 aliases: canonicalAliases)
+                    if !migrated.isEmpty { renamedKeys = migrated }
                     if let organizations = try? await remoteCatalog.organizations() {
                         githubOrganizations = organizations
                     }
@@ -900,7 +1018,7 @@ enum OwnerOrdering {
                     remoteOwners = Array(requestedOwners)
                     loadCachedProfiles(additionalOwners: priorityOwners)
                     saveRepositories()
-                    githubMessage = nil
+                    githubMessage = warnings.isEmpty ? nil : warnings.joined(separator: "\n")
                 } catch {
                     githubMessage = error.localizedDescription
                 }
@@ -2032,6 +2150,9 @@ struct LauncherView: View {
         .tint(Palette.accent)
         .frame(minWidth: 650, minHeight: 400)
         .task { await library.refresh(priorityOwners: ownerOrder.manualOwners) }
+        .onChange(of: library.renamedKeys) { _, keys in
+            for (old, new) in keys { repoUsage.migrate(from: old, to: new) }
+        }
         .task { calendarReminders.start() }
         .task(id: [folderQuery] + library.repos.map { "\($0.id):\($0.isLocal)" }) {
             let query = folderQuery.trimmingCharacters(in: .whitespacesAndNewlines)
