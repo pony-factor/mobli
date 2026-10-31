@@ -2,6 +2,10 @@
 set -eu
 repo_dir=${0:A:h:h}
 node "$repo_dir/tests/WorkspaceChecks.js"
+# Validate branch discovery and recent-first selection separately from SwiftUI.
+xcrun swiftc -parse-as-library "$repo_dir/Sources/RecentBranches.swift" "$repo_dir/tests/RecentBranchChecks.swift" -o /tmp/mobli-recent-branches-$
+/tmp/mobli-recent-branches-$
+rm -f /tmp/mobli-recent-branches-$
 check_dir=$(mktemp -d /tmp/mobli-checks.XXXXXX)
 trap 'rm -f "$check_dir/AgendaAPI.swift" "$check_dir/agenda-api-checks" "$check_dir/PinPlacement.swift" "$check_dir/pin-placement-checks" "$check_dir/Activity.swift" "$check_dir/activity-checks" "$check_dir/StreamModel.swift" "$check_dir/stream-checks" "$check_dir/Owner.swift" "$check_dir/Inbox.swift" "$check_dir/checks" "$check_dir/Discovery.swift" "$check_dir/discovery-checks" "$check_dir/OwnerOrder.swift" "$check_dir/owner-order-checks" "$check_dir/Agenda.swift" "$check_dir/agenda-checks"; rmdir "$check_dir"' EXIT
 # Regression guard: delegate independent clones to Sweetiebot without raising existing windows.

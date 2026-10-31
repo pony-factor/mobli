@@ -1002,33 +1002,48 @@ enum OwnerOrdering {
         openInVSCode(repo.url, displayName: repo.displayName)
     }
 
+    func openBranch(_ branch: RecentBranch) {
+        guard RecentBranches.active(at: branch.url, named: branch.name) else {
+            error = "The selected branch workspace is no longer available. Refresh Mobli and try again."
+            return
+        }
+        RecentBranches.recordOpened(branch)
+        // Existing branch checkouts are opened as-is, without switching another worktree.
+        openInVSCode(branch.url, displayName: branch.name, independent: false)
+    }
+
     func openFolder(_ url: URL) {
         openInVSCode(url, displayName: url.lastPathComponent)
     }
 
-    private func openInVSCode(_ url: URL, displayName: String) {
+    private func openInVSCode(_ url: URL, displayName: String, independent: Bool = true) {
         let candidates = ["/Applications/Visual Studio Code.app", NSHomeDirectory() + "/Applications/Visual Studio Code.app"]
         guard let app = candidates.first(where: { FileManager.default.fileExists(atPath: $0 + "/Contents/Resources/app/bin/code") }) else {
             error = "Install Visual Studio Code in Applications to open folders."; return
         }
-        guard let script = Bundle.main.url(forResource: "open-workspace", withExtension: "js") else {
-            error = "The Sweetiebot workspace launcher is missing. Rebuild Repository Launcher."
-            return
-        }
         let task = Process()
-        task.executableURL = URL(fileURLWithPath: app + "/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper")
-        var environment = ProcessInfo.processInfo.environment
-        environment["ELECTRON_RUN_AS_NODE"] = "1"
-        task.environment = environment
-        // Use the same independent-clone implementation as Sweetiebot's title bar.
-        task.arguments = [script.path, app + "/Contents/Resources/app/bin/code", url.path, displayName]
+        if independent {
+            guard let script = Bundle.main.url(forResource: "open-workspace", withExtension: "js") else {
+                error = "The Sweetiebot workspace launcher is missing. Rebuild Repository Launcher."
+                return
+            }
+            task.executableURL = URL(fileURLWithPath: app + "/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper")
+            var environment = ProcessInfo.processInfo.environment
+            environment["ELECTRON_RUN_AS_NODE"] = "1"
+            task.environment = environment
+            // Repository clicks start on main in an independent Sweetiebot checkout.
+            task.arguments = [script.path, app + "/Contents/Resources/app/bin/code", url.path, displayName]
+        } else {
+            task.executableURL = URL(fileURLWithPath: app + "/Contents/Resources/app/bin/code")
+            task.arguments = ["--new-window", url.path]
+        }
         task.standardOutput = FileHandle.nullDevice
         task.standardError = FileHandle.nullDevice
         let windows = NSApplication.shared.windows.filter { $0.isVisible && !$0.isMiniaturized }
         task.terminationHandler = { process in
             Task { @MainActor in
                 if process.terminationStatus == 0 { return }
-                self.error = "Couldn’t create a Sweetiebot workspace for \(displayName). Make sure Sweetiebot is installed and the repository has a local main branch."
+                self.error = "Couldn’t open \(displayName). For main launches, make sure Sweetiebot is installed and a local main branch exists."
                 NSApplication.shared.unhide(nil)
                 for window in windows { window.deminiaturize(nil) }
                 NSApplication.shared.activate(ignoringOtherApps: true)
@@ -1147,6 +1162,71 @@ struct SecondaryClickRegion: NSViewRepresentable {
     }
 }
 
+
+private struct RecentBranchMenu: ViewModifier {
+    let repo: Repository
+    let openBranch: (RecentBranch) -> Void
+    @State private var hovering = false
+    @State private var presented = false
+    @State private var branches: [RecentBranch] = []
+
+    func body(content: Content) -> some View {
+        content
+            .onHover { hovering = $0 }
+            .task(id: hovering) {
+                guard hovering else { return }
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+                guard !Task.isCancelled else { return }
+                let source = repo.url
+                let name = repo.repositoryName
+                let found = await Task.detached(priority: .utility) {
+                    RecentBranches.recent(for: source, repositoryName: name)
+                }.value
+                guard !Task.isCancelled && hovering else { return }
+                branches = found
+                presented = !found.isEmpty
+            }
+            .popover(isPresented: $presented, arrowEdge: .trailing) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Recent branches")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Palette.muted)
+                        .padding(.horizontal, 10)
+                        .padding(.top, 8)
+                    ForEach(Array(branches.enumerated()), id: \.element.id) { entry in
+                        let index = entry.offset
+                        let branch = entry.element
+                        Button {
+                            presented = false
+                            openBranch(branch)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "arrow.triangle.branch")
+                                    .font(.system(size: 11))
+                                Text(branch.name).lineLimit(1)
+                                Spacer(minLength: 4)
+                                if index == 0 {
+                                    Text("Recent")
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .padding(.horizontal, 7)
+                                        .padding(.vertical, 3)
+                                        .background(Capsule().fill(Palette.accent.opacity(0.2)))
+                                }
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Open the existing \(branch.name) checkout")
+                    }
+                }
+                .frame(minWidth: 250)
+                .padding(.bottom, 6)
+            }
+    }
+}
+
 struct RepositoryRow: View {
     let repo: Repository
     let pinned: Bool
@@ -1154,6 +1234,7 @@ struct RepositoryRow: View {
     let removing: Bool
     let togglePin: () -> Void
     let open: () -> Void
+    let openBranch: (RecentBranch) -> Void
     let clone: () -> Void
     let removeWorktree: () -> Void
     var dragKey: String? = nil
@@ -1203,6 +1284,7 @@ struct RepositoryRow: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(repo.displayName)
                 .onHover { hovered = $0 }
+                .modifier(RecentBranchMenu(repo: repo, openBranch: openBranch))
                 .help("Open \(repo.displayName) in a new VS Code window")
             } else {
                 HStack(spacing: 8) {
@@ -1286,6 +1368,7 @@ struct PinnedRepositoryItem: View {
     let repo: Repository
     let profile: OwnerProfile?
     let open: () -> Void
+    let openBranch: (RecentBranch) -> Void
     let togglePin: () -> Void
     @State private var hovered = false
 
@@ -1317,7 +1400,8 @@ struct PinnedRepositoryItem: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Open \(repo.name) in a new VS Code window")
+            .help("Click to open main; hover to choose a recent branch")
+            .modifier(RecentBranchMenu(repo: repo, openBranch: openBranch))
 
             Button(action: togglePin) {
                 Image(systemName: "pin.slash")
@@ -1848,6 +1932,10 @@ struct LauncherView: View {
                                             repoUsage.record(repo)
                                             library.open(repo)
                                         },
+                                        openBranch: { branch in
+                                            repoUsage.record(repo)
+                                            library.openBranch(branch)
+                                        },
                                         togglePin: { repoUsage.togglePin(repo) }
                                     )
                                     .onDrag { beginPinnedDrag(repo) }
@@ -1942,6 +2030,10 @@ struct LauncherView: View {
                                                     open: {
                                                         repoUsage.record(repo)
                                                         library.open(repo)
+                                                    },
+                                                    openBranch: { branch in
+                                                        repoUsage.record(repo)
+                                                        library.openBranch(branch)
                                                     },
                                                     clone: { Task { await library.clone(repo) } },
                                                     removeWorktree: { Task { await library.removeWorktree(repo) } },
