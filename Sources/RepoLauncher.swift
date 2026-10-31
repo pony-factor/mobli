@@ -1193,9 +1193,8 @@ private struct RecentBranchMenu: ViewModifier {
                         .foregroundStyle(Palette.muted)
                         .padding(.horizontal, 10)
                         .padding(.top, 8)
-                    ForEach(Array(branches.enumerated()), id: \.element.id) { entry in
-                        let index = entry.offset
-                        let branch = entry.element
+                    ForEach(branches.indices, id: \.self) { index in
+                        let branch = branches[index]
                         Button {
                             presented = false
                             openBranch(branch)
@@ -1285,7 +1284,7 @@ struct RepositoryRow: View {
                 .accessibilityLabel(repo.displayName)
                 .onHover { hovered = $0 }
                 .modifier(RecentBranchMenu(repo: repo, openBranch: openBranch))
-                .help("Open \(repo.displayName) in a new VS Code window")
+                .help("Click to open main; hover to choose a recent branch")
             } else {
                 HStack(spacing: 8) {
                     Image(systemName: "cloud")
