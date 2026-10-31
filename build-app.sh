@@ -8,6 +8,7 @@ ditto "$source_dir/AppIcon.icns" "$destination/Contents/Resources/AppIcon.icns"
 ditto "$source_dir/Assets/Fonts/Montserrat-Bold.ttf" "$destination/Contents/Resources/Fonts/Montserrat-Bold.ttf"
 ditto "$source_dir/Assets/Fonts/OFL.txt" "$destination/Contents/Resources/Fonts/OFL.txt"
 ditto "$source_dir/scripts/auto-update.sh" "$destination/Contents/Resources/auto-update.sh"
+ditto "$source_dir/scripts/open-workspace.js" "$destination/Contents/Resources/open-workspace.js"
 cat > "$destination/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

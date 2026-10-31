@@ -1019,17 +1019,24 @@ enum OwnerOrdering {
         guard let app = candidates.first(where: { FileManager.default.fileExists(atPath: $0 + "/Contents/Resources/app/bin/code") }) else {
             error = "Install Visual Studio Code in Applications to open folders."; return
         }
+        guard let script = Bundle.main.url(forResource: "open-workspace", withExtension: "js") else {
+            error = "The Sweetiebot workspace launcher is missing. Rebuild Repository Launcher."
+            return
+        }
         let task = Process()
-        task.executableURL = URL(fileURLWithPath: app + "/Contents/Resources/app/bin/code")
-        // Let VS Code focus the newly opened folder; activating the app would raise unrelated windows.
-        task.arguments = ["--new-window", url.path]
+        task.executableURL = URL(fileURLWithPath: app + "/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper")
+        var environment = ProcessInfo.processInfo.environment
+        environment["ELECTRON_RUN_AS_NODE"] = "1"
+        task.environment = environment
+        // Use the same independent-clone implementation as Sweetiebot's title bar.
+        task.arguments = [script.path, app + "/Contents/Resources/app/bin/code", url.path, displayName]
         task.standardOutput = FileHandle.nullDevice
         task.standardError = FileHandle.nullDevice
         let windows = NSApplication.shared.windows.filter { $0.isVisible && !$0.isMiniaturized }
         task.terminationHandler = { process in
             Task { @MainActor in
                 if process.terminationStatus == 0 { return }
-                self.error = "VS Code couldn’t open \(displayName). Try again."
+                self.error = "Couldn’t create a Sweetiebot workspace for \(displayName). Make sure Sweetiebot is installed and the repository has a local main branch."
                 NSApplication.shared.unhide(nil)
                 for window in windows { window.deminiaturize(nil) }
                 NSApplication.shared.activate(ignoringOtherApps: true)
@@ -1039,7 +1046,9 @@ enum OwnerOrdering {
             try task.run()
             for window in windows { window.miniaturize(nil) }
             NSApplication.shared.hide(nil)
-        } catch { self.error = error.localizedDescription }
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 }
 
