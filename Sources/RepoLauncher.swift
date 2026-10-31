@@ -1162,7 +1162,6 @@ struct SecondaryClickRegion: NSViewRepresentable {
     }
 }
 
-
 private struct RecentBranchMenu: ViewModifier {
     let repo: Repository
     let openBranch: (RecentBranch) -> Void
@@ -1367,6 +1366,20 @@ struct RepositoryRow: View {
     }
 }
 
+// Keep the requested classic bold face on headings only; other UI text stays native.
+enum HeadingTypography {
+    static func classicBold(size: CGFloat) -> Font {
+        // Canva's "Montserrat Classic" is not supplied as a redistributable face.
+        // Prefer it when present locally; otherwise use the bundled original Montserrat Bold.
+        for name in ["MontserratClassic-Bold", "Montserrat Classic Bold", "Montserrat-Bold"] {
+            if NSFont(name: name, size: size) != nil {
+                return .custom(name, size: size)
+            }
+        }
+        return .system(size: size, weight: .bold)
+    }
+}
+
 struct PinnedRepositoryItem: View {
     static let width: CGFloat = 260
     static let height: CGFloat = 60
@@ -1393,7 +1406,7 @@ struct PinnedRepositoryItem: View {
                             .clipShape(RoundedRectangle(cornerRadius: 5))
                     }
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(repo.name).font(.system(size: 16, weight: .semibold)).lineLimit(1)
+                        Text(repo.name).font(HeadingTypography.classicBold(size: 16)).lineLimit(1)
                             .background(SecondaryClickRegion {
                                 if let url = repo.githubURL { NSWorkspace.shared.open(url) }
                             })
@@ -1450,7 +1463,7 @@ struct OwnerHeader: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             VStack(alignment: .leading, spacing: 3) {
-                Text(displayTitle).font(.system(size: 16, weight: .semibold)).lineLimit(2)
+                Text(displayTitle).font(HeadingTypography.classicBold(size: 16)).lineLimit(2)
                 if showOwnerSlugs, displayTitle != owner {
                     Text(owner).font(.system(size: 12)).foregroundStyle(Palette.muted)
                 }
@@ -1812,6 +1825,7 @@ struct LauncherView: View {
     @StateObject private var inbox = Inbox()
     @StateObject private var activityFeed = ActivityFeed()
     @StateObject private var streamPreferences = StreamPreferences()
+    @StateObject private var calendarReminders = CalendarReminderCoordinator()
     @StateObject private var ownerOrder = OwnerOrderPreferences()
     @StateObject private var repoUsage = RepositoryUsageStore()
     @State private var notifications = false
@@ -2124,6 +2138,7 @@ struct LauncherView: View {
         .tint(Palette.accent)
         .frame(minWidth: 650, minHeight: 400)
         .task { await library.refresh(priorityOwners: ownerOrder.manualOwners) }
+        .task { calendarReminders.start() }
         .task(id: [folderQuery] + library.repos.map { "\($0.id):\($0.isLocal)" }) {
             let query = folderQuery.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !query.isEmpty else {
@@ -2178,6 +2193,7 @@ struct LauncherView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
+                calendarReminders.check()
                 Task {
                     if activity {
                         await library.refresh(priorityOwners: ownerOrder.manualOwners)
@@ -2248,6 +2264,9 @@ struct LauncherView: View {
                     }
                     settingsSectionColumn("GitHub") {
                         StreamSettingsView(preferences: streamPreferences)
+                    }
+                    settingsSectionColumn("Calendar reminders") {
+                        settingsBlock { CalendarReminderSettings(coordinator: calendarReminders) }
                     }
                 }
             }

@@ -2,9 +2,11 @@
 set -eu
 source_dir=${0:A:h}
 destination=${1:-"$source_dir/Repository Launcher.app"}
-mkdir -p "$destination/Contents/MacOS" "$destination/Contents/Resources"
-xcrun swiftc -O -parse-as-library "$source_dir/Sources/RepoLauncher.swift" "$source_dir/Sources/RecentBranches.swift" "$source_dir/Sources/Notifications.swift" "$source_dir/Sources/Agenda.swift" "$source_dir/Sources/Activity.swift" "$source_dir/Sources/Stream.swift" -o "$destination/Contents/MacOS/RepositoryLauncher" -framework SwiftUI -framework AppKit -framework Security
+mkdir -p "$destination/Contents/MacOS" "$destination/Contents/Resources/Fonts"
+xcrun swiftc -O -parse-as-library "$source_dir/Sources/RepoLauncher.swift" "$source_dir/Sources/RecentBranches.swift" "$source_dir/Sources/Notifications.swift" "$source_dir/Sources/Agenda.swift" "$source_dir/Sources/Activity.swift" "$source_dir/Sources/Stream.swift" "$source_dir/Sources/CalendarReminders.swift" -o "$destination/Contents/MacOS/RepositoryLauncher" -framework SwiftUI -framework AppKit -framework Security
 ditto "$source_dir/AppIcon.icns" "$destination/Contents/Resources/AppIcon.icns"
+ditto "$source_dir/Assets/Fonts/Montserrat-Bold.ttf" "$destination/Contents/Resources/Fonts/Montserrat-Bold.ttf"
+ditto "$source_dir/Assets/Fonts/OFL.txt" "$destination/Contents/Resources/Fonts/OFL.txt"
 ditto "$source_dir/scripts/auto-update.sh" "$destination/Contents/Resources/auto-update.sh"
 ditto "$source_dir/scripts/open-workspace.js" "$destination/Contents/Resources/open-workspace.js"
 cat > "$destination/Contents/Info.plist" <<'PLIST'
@@ -14,6 +16,7 @@ cat > "$destination/Contents/Info.plist" <<'PLIST'
 <key>CFBundleExecutable</key><string>RepositoryLauncher</string>
 <key>CFBundleIdentifier</key><string>studio.repository-launcher</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
+<key>ATSApplicationFontsPath</key><string>Fonts/</string>
 <key>CFBundleName</key><string>Repository Launcher</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>1.0</string>
@@ -26,10 +29,10 @@ revision=$(/usr/bin/git -C "$source_dir" rev-parse HEAD 2>/dev/null || true)
 source_clean=false
 if /usr/bin/git -C "$source_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   source_clean=true
-  if ! /usr/bin/git -C "$source_dir" diff --quiet HEAD -- Sources AppIcon.icns build-app.sh scripts; then
+  if ! /usr/bin/git -C "$source_dir" diff --quiet HEAD -- Sources Assets AppIcon.icns build-app.sh scripts; then
     source_clean=false
   fi
-  if [[ -n "$(/usr/bin/git -C "$source_dir" ls-files --others --exclude-standard -- Sources scripts)" ]]; then
+  if [[ -n "$(/usr/bin/git -C "$source_dir" ls-files --others --exclude-standard -- Sources Assets scripts)" ]]; then
     source_clean=false
   fi
 fi

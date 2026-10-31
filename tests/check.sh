@@ -2,12 +2,29 @@
 set -eu
 repo_dir=${0:A:h:h}
 node "$repo_dir/tests/WorkspaceChecks.js"
-# Validate branch discovery and recent-first selection separately from SwiftUI.
-xcrun swiftc -parse-as-library "$repo_dir/Sources/RecentBranches.swift" "$repo_dir/tests/RecentBranchChecks.swift" -o /tmp/mobli-recent-branches-$
-/tmp/mobli-recent-branches-$
-rm -f /tmp/mobli-recent-branches-$
 check_dir=$(mktemp -d /tmp/mobli-checks.XXXXXX)
-trap 'rm -f "$check_dir/AgendaAPI.swift" "$check_dir/agenda-api-checks" "$check_dir/PinPlacement.swift" "$check_dir/pin-placement-checks" "$check_dir/Activity.swift" "$check_dir/activity-checks" "$check_dir/StreamModel.swift" "$check_dir/stream-checks" "$check_dir/Owner.swift" "$check_dir/Inbox.swift" "$check_dir/checks" "$check_dir/Discovery.swift" "$check_dir/discovery-checks" "$check_dir/OwnerOrder.swift" "$check_dir/owner-order-checks" "$check_dir/Agenda.swift" "$check_dir/agenda-checks"; rmdir "$check_dir"' EXIT
+trap 'rm -f "$check_dir/CalendarModel.swift" "$check_dir/calendar-day-checks" "$check_dir/AgendaAPI.swift" "$check_dir/agenda-api-checks" "$check_dir/PinPlacement.swift" "$check_dir/pin-placement-checks" "$check_dir/Activity.swift" "$check_dir/activity-checks" "$check_dir/StreamModel.swift" "$check_dir/stream-checks" "$check_dir/Owner.swift" "$check_dir/Inbox.swift" "$check_dir/checks" "$check_dir/Discovery.swift" "$check_dir/discovery-checks" "$check_dir/OwnerOrder.swift" "$check_dir/owner-order-checks" "$check_dir/Agenda.swift" "$check_dir/agenda-checks" "$check_dir/recent-branch-checks"; rmdir "$check_dir"' EXIT
+# Exercise Git-linked and Sweetiebot independent branch discovery before the UI tests.
+xcrun swiftc -parse-as-library "$repo_dir/Sources/RecentBranches.swift" "$repo_dir/tests/RecentBranchChecks.swift" -o "$check_dir/recent-branch-checks"
+"$check_dir/recent-branch-checks"
+# Regression guard: the custom face only changes pinned and owner headings.
+python3 - "$repo_dir" <<'PY'
+from pathlib import Path
+import sys
+repo = Path(sys.argv[1])
+source = (repo / "Sources/RepoLauncher.swift").read_text()
+assert "enum HeadingTypography" in source
+assert '["MontserratClassic-Bold", "Montserrat Classic Bold", "Montserrat-Bold"]' in source
+assert source.count(".font(HeadingTypography.classicBold(size: 16))") == 2
+assert "Text(repo.name).font(HeadingTypography.classicBold(size: 16))" in source
+assert "Text(displayTitle).font(HeadingTypography.classicBold(size: 16))" in source
+build = (repo / "build-app.sh").read_text()
+assert '<key>ATSApplicationFontsPath</key><string>Fonts/</string>' in build
+assert "Assets/Fonts/Montserrat-Bold.ttf" in build and "Assets/Fonts/OFL.txt" in build
+assert (repo / "Assets/Fonts/Montserrat-Bold.ttf").stat().st_size > 10_000
+assert "SIL OPEN FONT LICENSE" in (repo / "Assets/Fonts/OFL.txt").read_text()
+print("Pinned and organization heading typography checks passed")
+PY
 # Regression guard: delegate independent clones to Sweetiebot without raising existing windows.
 python3 - "$repo_dir/Sources/RepoLauncher.swift" <<'PY'
 from pathlib import Path
@@ -16,9 +33,9 @@ source = Path(sys.argv[1]).read_text()
 launch = source.split('private func openInVSCode(', 1)[1].split('\nenum Palette', 1)[0]
 assert 'forResource: "open-workspace", withExtension: "js"' in launch, "Use the bundled Sweetiebot bridge"
 assert 'url.path, displayName]' in launch, "Pass the selected checkout to Sweetiebot"
-assert '.activateAllWindows' not in launch, "Do not raise every existing VS Code window"
-assert 'vsCode.activate(' not in launch and 'yieldActivation(' not in launch, "Leave window focus to the VS Code CLI"
-print("VS Code selected-window launch checks passed")
+assert '.activateAllWindows' not in launch, "Do not raise existing VS Code windows"
+assert 'vsCode.activate(' not in launch and 'yieldActivation(' not in launch, "Leave focus to VS Code"
+print("Sweetiebot workspace selected-window launch checks passed")
 PY
 # Regression guard: the unified branch menu opens existing checkouts rather than cloning
 # another workspace or inventing a different Git branch.
@@ -75,6 +92,18 @@ source = (repo / 'Sources' / 'Agenda.swift').read_text()
 (out / 'Agenda.swift').write_text('import Foundation\n' + source[source.index('struct AgendaProject:'):source.index('enum AgendaFailure:')])
 (out / 'AgendaAPI.swift').write_text('import Foundation\nimport AppKit\nenum GitHubInbox { static let executable: String? = nil }\n' + source[source.index('struct AgendaProject:'):source.index('@MainActor final class Agenda:')])
 PY
+# Build the platform-neutral calendar model independently of AppKit/SwiftUI,
+# so malformed and timezone-sensitive calendar data is checked in CI.
+python3 - "$repo_dir/Sources/CalendarReminders.swift" "$check_dir/CalendarModel.swift" <<'PY'
+from pathlib import Path
+import sys
+source = Path(sys.argv[1]).read_text()
+model = source[source.index('struct CalendarDayEntry:'):source.index('actor CalendarDocumentLoader {')]
+Path(sys.argv[2]).write_text('import Foundation\n' + model)
+PY
+xcrun swiftc -parse-as-library "$check_dir/CalendarModel.swift" "$repo_dir/tests/CalendarDayChecks.swift" -o "$check_dir/calendar-day-checks"
+"$check_dir/calendar-day-checks"
+
 xcrun swiftc -parse-as-library "$check_dir/Owner.swift" "$check_dir/Inbox.swift" "$repo_dir/tests/InboxChecks.swift" -o "$check_dir/checks" -framework AppKit
 "$check_dir/checks"
 
