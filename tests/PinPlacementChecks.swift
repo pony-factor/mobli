@@ -29,6 +29,16 @@ import Foundation
         restored.togglePin(first)
         precondition(restored.isPinned(first) && !restored.isColumnPinned(first))
         precondition(restored.pinnedRepositories(from: [first, second]).map(\.usageKey) == [first.usageKey])
+        let primaryLinkedCheckout = Repository(
+            url: URL(fileURLWithPath: NSHomeDirectory() + "/GitHub/org/shared"),
+            owner: "org", lastActivityAt: nil,
+            gitCommonDirectory: URL(fileURLWithPath: "/tmp/shared-git-data")
+        )
+        restored.togglePin(primaryLinkedCheckout)
+        precondition(restored.isPinned(primaryLinkedCheckout))
+        precondition(restored.pinnedRepositories(from: [primaryLinkedCheckout]).count == 1)
+        restored.placeInColumn(primaryLinkedCheckout)
+        precondition(restored.isColumnPinned(primaryLinkedCheckout))
         print("PASS: pin migration, top-to-column placement, explicit column order, persistence, and repinning")
     }
 }

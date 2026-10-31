@@ -33,7 +33,15 @@ struct Repository: Identifiable, Codable, Sendable {
         components.path = "/\(owner)/\(repositoryName)"
         return components.url
     }
-    var isWorktree: Bool { isLocal && gitCommonDirectory != nil }
+    var isWorktree: Bool {
+        guard isLocal, gitCommonDirectory != nil else { return false }
+        // The usual repository location stays pinnable even when Git stores its
+        // shared data elsewhere. Only additional checkouts get removal controls.
+        let primaryURL = URL(fileURLWithPath: NSHomeDirectory() + "/GitHub")
+            .appendingPathComponent(owner, isDirectory: true)
+            .appendingPathComponent(repositoryName, isDirectory: true)
+        return url.standardizedFileURL.path != primaryURL.standardizedFileURL.path
+    }
     var displayName: String { isWorktree ? repositoryName : name }
     var worktreeDetail: String? {
         guard isWorktree else { return nil }
