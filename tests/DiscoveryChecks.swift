@@ -206,7 +206,8 @@ import Foundation
         let recognized = Discovery.reconciled(local: [localOld], remote: [githubNew],
                                               aliases: [localOld.id: githubNew])
         precondition(recognized.count == 1 && recognized[0].isLocal)
-        precondition(recognized[0].url == previous)
+        // Discovery canonicalizes file URLs; temporaryDirectory may use /var instead of /private/var on macOS.
+        precondition(recognized[0].url.standardizedFileURL.path == previous.standardizedFileURL.path)
         precondition(recognized[0].usageKey == githubNew.usageKey)
         precondition(recognized[0].displayName == "new-name")
         // No GitHub identity confirmation means no automatic deduplication.
