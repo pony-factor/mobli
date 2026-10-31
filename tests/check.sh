@@ -20,6 +20,23 @@ assert '.activateAllWindows' not in launch, "Do not raise every existing VS Code
 assert 'vsCode.activate(' not in launch and 'yieldActivation(' not in launch, "Leave window focus to the VS Code CLI"
 print("VS Code selected-window launch checks passed")
 PY
+# Regression guard: the unified branch menu opens existing checkouts rather than cloning
+# another workspace or inventing a different Git branch.
+python3 - "$repo_dir/Sources/RepoLauncher.swift" <<'PY'
+from pathlib import Path
+import sys
+source = Path(sys.argv[1]).read_text()
+menu = source.split('private struct RecentBranchMenu:', 1)[1].split('struct RepositoryRow: View', 1)[0]
+branch_open = source.split('    func openBranch(_ branch: RecentBranch)', 1)[1].split('    func openFolder(', 1)[0]
+assert 'Task.sleep(for: .seconds(1))' in menu, "Delay hover menu by one second"
+assert 'ForEach(branches.indices' in menu and 'openBranch(branch)' in menu, "Every listed branch must be clickable"
+assert '.accessibilityLabel("Open branch \\(branch.name)")' in menu, "Branch rows need accessible launch actions"
+assert 'Text("Recent")' in menu and 'index == 0' in menu, "Only the first branch gets the recent pill"
+assert 'worktree' not in menu.lower(), "Do not separate or badge worktrees in the branch menu"
+assert 'RecentBranches.active(at: branch.url, named: branch.name)' in branch_open, "Validate stale checkout paths"
+assert 'openInVSCode(branch.url, displayName: branch.name, independent: false)' in branch_open, "Open the existing checkout, not a new main clone"
+print("Unified clickable branch picker checks passed")
+PY
 # Regression guard: activating Mobli follows the current macOS Space, even if
 # its existing window is still visible on a different Space.
 python3 - "$repo_dir/Sources/RepoLauncher.swift" <<'PY'

@@ -1169,6 +1169,7 @@ private struct RecentBranchMenu: ViewModifier {
     @State private var hovering = false
     @State private var presented = false
     @State private var branches: [RecentBranch] = []
+    @State private var hoveredBranch: String?
 
     func body(content: Content) -> some View {
         content
@@ -1188,7 +1189,7 @@ private struct RecentBranchMenu: ViewModifier {
             }
             .popover(isPresented: $presented, arrowEdge: .trailing) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Recent branches")
+                    Text("Branches")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Palette.muted)
                         .padding(.horizontal, 10)
@@ -1211,12 +1212,18 @@ private struct RecentBranchMenu: ViewModifier {
                                         .padding(.vertical, 3)
                                         .background(Capsule().fill(Palette.accent.opacity(0.2)))
                                 }
+                                Image(systemName: "arrow.up.right")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(Palette.muted)
                             }
                             .padding(.horizontal, 10)
                             .padding(.vertical, 7)
+                            .background(hoveredBranch == branch.id ? Color.white.opacity(0.07) : Color.clear)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .onHover { hoveredBranch = $0 ? branch.id : nil }
+                        .accessibilityLabel("Open branch \(branch.name)")
                         .help("Open the existing \(branch.name) checkout")
                     }
                 }
