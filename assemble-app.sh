@@ -9,6 +9,8 @@ codesign --verify --deep --strict "$arm_app"
 codesign --verify --deep --strict "$intel_app"
 cmp "$arm_app/Contents/Info.plist" "$intel_app/Contents/Info.plist"
 cmp "$arm_app/Contents/Resources/AppIcon.icns" "$intel_app/Contents/Resources/AppIcon.icns"
+cmp "$arm_app/Contents/Resources/Fonts/Montserrat-Bold.ttf" "$intel_app/Contents/Resources/Fonts/Montserrat-Bold.ttf"
+cmp "$arm_app/Contents/Resources/Fonts/OFL.txt" "$intel_app/Contents/Resources/Fonts/OFL.txt"
 
 assembly_dir=$(mktemp -d /tmp/mobli-universal.XXXXXX)
 trap 'rm -rf "$assembly_dir"' EXIT
