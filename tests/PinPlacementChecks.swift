@@ -29,6 +29,14 @@ import Foundation
         restored.togglePin(first)
         precondition(restored.isPinned(first) && !restored.isColumnPinned(first))
         precondition(restored.pinnedRepositories(from: [first, second]).map(\.usageKey) == [first.usageKey])
+        let renamed = Repository(url: URL(fileURLWithPath: "/tmp/org/renamed"), owner: "org", lastActivityAt: nil)
+        restored.placeInColumn(second)
+        restored.record(second)
+        restored.migrate(from: second.usageKey, to: renamed.usageKey)
+        precondition(restored.isPinned(renamed) && restored.isColumnPinned(renamed))
+        precondition(!restored.isPinned(second) && !restored.isColumnPinned(second))
+        precondition(RepositoryUsageStore(defaults: defaults).isPinned(renamed))
+        precondition(restored.ranked([ordinary, renamed]).first?.usageKey == renamed.usageKey)
         let primaryLinkedCheckout = Repository(
             url: URL(fileURLWithPath: NSHomeDirectory() + "/GitHub/org/shared"),
             owner: "org", lastActivityAt: nil,
@@ -38,7 +46,6 @@ import Foundation
         precondition(restored.isPinned(primaryLinkedCheckout))
         precondition(restored.pinnedRepositories(from: [primaryLinkedCheckout]).count == 1)
         restored.placeInColumn(primaryLinkedCheckout)
-        precondition(restored.isColumnPinned(primaryLinkedCheckout))
-        print("PASS: pin migration, top-to-column placement, explicit column order, persistence, and repinning")
+        precondition(restored.isColumnPinned(primaryLinkedCheckout))        print("PASS: pin migration, top-to-column placement, explicit column order, persistence, and repinning")
     }
 }
