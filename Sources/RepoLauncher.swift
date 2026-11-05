@@ -44,7 +44,8 @@ struct Repository: Identifiable, Codable, Sendable {
             .appendingPathComponent(repositoryName, isDirectory: true)
         return url.standardizedFileURL.path != primaryURL.standardizedFileURL.path
     }
-    var displayName: String { githubID != nil && repositoryName != name ? repositoryName : (isWorktree ? repositoryName : name) }    var worktreeDetail: String? {
+    var displayName: String { githubID != nil && repositoryName != name ? repositoryName : (isWorktree ? repositoryName : name) }
+    var worktreeDetail: String? {
         guard isWorktree else { return nil }
         return name.caseInsensitiveCompare(repositoryName) == .orderedSame ? "Worktree" : "Worktree · " + name
     }
