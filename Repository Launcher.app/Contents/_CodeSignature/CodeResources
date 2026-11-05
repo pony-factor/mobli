@@ -20,6 +20,10 @@
 		<data>
 		ubxwW8htmIQlcAKbREjywBjinWU=
 		</data>
+		<key>Resources/open-workspace.js</key>
+		<data>
+		ft2Sec0ZVL9SKvdVdcIzw7CEDzE=
+		</data>
 		<key>Resources/source-root.txt</key>
 		<data>
 		77UMuxAMPgfhsiLtd/igBfkAUnw=
@@ -53,6 +57,13 @@
 			<key>hash2</key>
 			<data>
 			FHBETfWsTOfR3lKzvCzDqi2vDWs4pg8vgY1c26xny6o=
+			</data>
+		</dict>
+		<key>Resources/open-workspace.js</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			0YcXe567/KbmIkB2ADxi/XgDLAC0hhrLOQLeKlgjqU0=
 			</data>
 		</dict>
 		<key>Resources/source-root.txt</key>
