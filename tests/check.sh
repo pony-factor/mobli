@@ -3,7 +3,22 @@ set -eu
 repo_dir=${0:A:h:h}
 node "$repo_dir/tests/WorkspaceChecks.js"
 check_dir=$(mktemp -d /tmp/mobli-checks.XXXXXX)
-trap 'rm -f "$check_dir/CalendarModel.swift" "$check_dir/calendar-day-checks" "$check_dir/AgendaAPI.swift" "$check_dir/agenda-api-checks" "$check_dir/PinPlacement.swift" "$check_dir/pin-placement-checks" "$check_dir/Activity.swift" "$check_dir/activity-checks" "$check_dir/StreamModel.swift" "$check_dir/stream-checks" "$check_dir/Owner.swift" "$check_dir/Inbox.swift" "$check_dir/checks" "$check_dir/Discovery.swift" "$check_dir/discovery-checks" "$check_dir/OwnerOrder.swift" "$check_dir/owner-order-checks" "$check_dir/Agenda.swift" "$check_dir/agenda-checks"; rmdir "$check_dir"' EXIT
+trap 'rm -f "$check_dir/CalendarModel.swift" "$check_dir/calendar-day-checks" "$check_dir/AgendaAPI.swift" "$check_dir/agenda-api-checks" "$check_dir/PinPlacement.swift" "$check_dir/pin-placement-checks" "$check_dir/Activity.swift" "$check_dir/activity-checks" "$check_dir/StreamModel.swift" "$check_dir/stream-checks" "$check_dir/Owner.swift" "$check_dir/Inbox.swift" "$check_dir/checks" "$check_dir/Discovery.swift" "$check_dir/discovery-checks" "$check_dir/OwnerOrder.swift" "$check_dir/owner-order-checks" "$check_dir/Agenda.swift" "$check_dir/agenda-checks" "$check_dir/recent-branch-checks"; rmdir "$check_dir"' EXIT
+# Run the platform-neutral recent-branch discovery regression tests.
+xcrun swiftc -parse-as-library "$repo_dir/Sources/RecentBranches.swift" "$repo_dir/tests/RecentBranchChecks.swift" -o "$check_dir/recent-branch-checks"
+"$check_dir/recent-branch-checks"
+python3 - "$repo_dir/Sources/RepoLauncher.swift" <<'PY'
+from pathlib import Path
+import sys
+source = Path(sys.argv[1]).read_text()
+menu = source.split("struct RecentBranchMenu: ViewModifier {", 1)[1].split("struct RepositoryRow: View {", 1)[0]
+opening = source.split("    func openBranch(_ branch: RecentBranch) {", 1)[1].split("    func openFolder(", 1)[0]
+assert 'Text("Recent")' in menu and "index == 0" in menu
+assert "RecentBranches.active(at: branch.url, named: branch.name)" in opening
+assert source.count(".modifier(RecentBranchMenu(repo: repo, openBranch: openBranch))") == 2
+assert 'task.arguments = ["--new-window", url.path]' in source
+print("Recent-branch picker wiring checks passed")
+PY
 # Regression guard: the custom face only changes pinned and owner headings.
 python3 - "$repo_dir" <<'PY'
 from pathlib import Path
