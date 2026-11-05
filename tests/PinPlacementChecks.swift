@@ -46,6 +46,7 @@ import Foundation
         precondition(restored.isPinned(primaryLinkedCheckout))
         precondition(restored.pinnedRepositories(from: [primaryLinkedCheckout]).count == 1)
         restored.placeInColumn(primaryLinkedCheckout)
-        precondition(restored.isColumnPinned(primaryLinkedCheckout))        print("PASS: pin migration, top-to-column placement, explicit column order, persistence, and repinning")
+        precondition(restored.isColumnPinned(primaryLinkedCheckout))
+        print("PASS: pin migration, top-to-column placement, explicit column order, persistence, and repinning")
     }
 }
