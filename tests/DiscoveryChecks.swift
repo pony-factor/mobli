@@ -177,6 +177,68 @@ import Foundation
         precondition(fallbackNames.contains("GitHub"))
         precondition(fallbackNames.contains("Desktop"))
 
+        // Rename the canonical standalone clone, preserving an untracked file and origin protocol.
+        let renameRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: renameRoot) }
+        let previous = renameRoot.appendingPathComponent("pony-factor/old-name")
+        let replacement = renameRoot.appendingPathComponent("pony-factor/new-name")
+        try FileManager.default.createDirectory(at: previous, withIntermediateDirectories: true)
+        func gitIn(_ directory: URL, _ arguments: [String]) throws {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            task.arguments = ["-C", directory.path] + arguments
+            task.standardOutput = FileHandle.nullDevice
+            task.standardError = FileHandle.nullDevice
+            try task.run()
+            task.waitUntilExit()
+            precondition(task.terminationStatus == 0)
+        }
+        try gitIn(previous, ["init"])
+        try gitIn(previous, ["remote", "add", "origin", "git@github.com:pony-factor/old-name.git"])
+        try Data("keep local edits".utf8).write(to: previous.appendingPathComponent("untracked.txt"))
+        let localOld = try Discovery.scan(renameRoot)[0]
+        let githubNew = Repository(url: replacement, owner: "pony-factor", lastActivityAt: nil,
+                                  cloneURL: URL(string: "https://github.com/pony-factor/new-name.git"),
+                                  githubName: "new-name", githubID: 42)
+        let change = RepositoryRename.Change(local: localOld, remote: githubNew)
+        // A name-only merge incorrectly shows the old clone and new cloud row.
+        precondition(Discovery.merged(local: [localOld], remote: [githubNew]).count == 2)
+        let recognized = Discovery.reconciled(local: [localOld], remote: [githubNew],
+                                              aliases: [localOld.id: githubNew])
+        precondition(recognized.count == 1 && recognized[0].isLocal)
+        // Discovery canonicalizes file URLs; temporaryDirectory may use /var instead of /private/var on macOS.
+        precondition(recognized[0].url.standardizedFileURL.path == previous.standardizedFileURL.path)
+        precondition(recognized[0].usageKey == githubNew.usageKey)
+        precondition(recognized[0].displayName == "new-name")
+        // No GitHub identity confirmation means no automatic deduplication.
+        precondition(Discovery.reconciled(local: [localOld], remote: [githubNew],
+                                           aliases: [:]).count == 2)
+        precondition(RepositoryRename.updatedOrigin("https://github.com/pony-factor/old-name.git",
+            owner: "pony-factor", oldName: "old-name", newName: "new-name")
+            == "https://github.com/pony-factor/new-name.git")
+        precondition(RepositoryRename.updatedOrigin("git@github.com:pony-factor/old-name.git",
+            owner: "pony-factor", oldName: "old-name", newName: "new-name")
+            == "git@github.com:pony-factor/new-name.git")
+        precondition(RepositoryRename.updatedOrigin("https://example.com/pony-factor/old-name",
+            owner: "pony-factor", oldName: "old-name", newName: "new-name") == nil)
+        try FileManager.default.createDirectory(at: replacement, withIntermediateDirectories: true)
+        do {
+            _ = try RepositoryRename.perform(change, root: renameRoot)
+            preconditionFailure("Occupied destinations must be rejected")
+        } catch { precondition(FileManager.default.fileExists(atPath: previous.path)) }
+        // Occupied destinations must not reintroduce a phantom cloud repository.
+        precondition(Discovery.reconciled(local: [localOld], remote: [githubNew],
+                                           aliases: [localOld.id: githubNew]).count == 1)
+        try FileManager.default.removeItem(at: replacement)
+        let moved = try RepositoryRename.perform(change, root: renameRoot)
+        precondition(moved)
+        precondition(!FileManager.default.fileExists(atPath: previous.path))
+        let untracked = try String(contentsOf: replacement.appendingPathComponent("untracked.txt"), encoding: .utf8)
+        precondition(untracked == "keep local edits")
+        let renamedDiscovery = try Discovery.scan(renameRoot)
+        precondition(renamedDiscovery.count == 1 && renamedDiscovery[0].name == "new-name")
+        precondition(renamedDiscovery[0].githubName == "new-name")
+
         let cacheDirectory = root.appendingPathComponent("launcher-cache")
         let cache = RepositoryCache(directory: cacheDirectory)
         precondition(cache.load(root: root) == nil)

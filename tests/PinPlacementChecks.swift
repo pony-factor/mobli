@@ -29,6 +29,14 @@ import Foundation
         restored.togglePin(first)
         precondition(restored.isPinned(first) && !restored.isColumnPinned(first))
         precondition(restored.pinnedRepositories(from: [first, second]).map(\.usageKey) == [first.usageKey])
+        let renamed = Repository(url: URL(fileURLWithPath: "/tmp/org/renamed"), owner: "org", lastActivityAt: nil)
+        restored.placeInColumn(second)
+        restored.record(second)
+        restored.migrate(from: second.usageKey, to: renamed.usageKey)
+        precondition(restored.isPinned(renamed) && restored.isColumnPinned(renamed))
+        precondition(!restored.isPinned(second) && !restored.isColumnPinned(second))
+        precondition(RepositoryUsageStore(defaults: defaults).isPinned(renamed))
+        precondition(restored.ranked([ordinary, renamed]).first?.usageKey == renamed.usageKey)
         print("PASS: pin migration, top-to-column placement, explicit column order, persistence, and repinning")
     }
 }

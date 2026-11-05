@@ -3,7 +3,7 @@ set -eu
 source_dir=${0:A:h}
 destination=${1:-"$source_dir/Repository Launcher.app"}
 mkdir -p "$destination/Contents/MacOS" "$destination/Contents/Resources/Fonts"
-xcrun swiftc -O -parse-as-library "$source_dir/Sources/RepoLauncher.swift" "$source_dir/Sources/Notifications.swift" "$source_dir/Sources/Agenda.swift" "$source_dir/Sources/Activity.swift" "$source_dir/Sources/Stream.swift" "$source_dir/Sources/CalendarReminders.swift" -o "$destination/Contents/MacOS/RepositoryLauncher" -framework SwiftUI -framework AppKit -framework Security
+xcrun swiftc -O -parse-as-library "$source_dir/Sources/RepoLauncher.swift" "$source_dir/Sources/RepositoryRename.swift" "$source_dir/Sources/Notifications.swift" "$source_dir/Sources/Agenda.swift" "$source_dir/Sources/Activity.swift" "$source_dir/Sources/Stream.swift" "$source_dir/Sources/CalendarReminders.swift" -o "$destination/Contents/MacOS/RepositoryLauncher" -framework SwiftUI -framework AppKit -framework Security
 ditto "$source_dir/AppIcon.icns" "$destination/Contents/Resources/AppIcon.icns"
 ditto "$source_dir/Assets/Fonts/Montserrat-Bold.ttf" "$destination/Contents/Resources/Fonts/Montserrat-Bold.ttf"
 for weight in Regular Medium SemiBold; do
@@ -11,6 +11,7 @@ for weight in Regular Medium SemiBold; do
 done
 ditto "$source_dir/Assets/Fonts/OFL.txt" "$destination/Contents/Resources/Fonts/OFL.txt"
 ditto "$source_dir/scripts/auto-update.sh" "$destination/Contents/Resources/auto-update.sh"
+ditto "$source_dir/scripts/open-workspace.js" "$destination/Contents/Resources/open-workspace.js"
 cat > "$destination/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

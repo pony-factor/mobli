@@ -1,6 +1,7 @@
 #!/bin/zsh
 set -eu
 repo_dir=${0:A:h:h}
+node "$repo_dir/tests/WorkspaceChecks.js"
 check_dir=$(mktemp -d /tmp/mobli-checks.XXXXXX)
 trap 'rm -f "$check_dir/CalendarModel.swift" "$check_dir/calendar-day-checks" "$check_dir/AgendaAPI.swift" "$check_dir/agenda-api-checks" "$check_dir/PinPlacement.swift" "$check_dir/pin-placement-checks" "$check_dir/Activity.swift" "$check_dir/activity-checks" "$check_dir/StreamModel.swift" "$check_dir/stream-checks" "$check_dir/Owner.swift" "$check_dir/Inbox.swift" "$check_dir/checks" "$check_dir/Discovery.swift" "$check_dir/discovery-checks" "$check_dir/OwnerOrder.swift" "$check_dir/owner-order-checks" "$check_dir/Agenda.swift" "$check_dir/agenda-checks"; rmdir "$check_dir"' EXIT
 # Regression guard: the custom face only changes pinned and owner headings.
@@ -22,16 +23,17 @@ assert (repo / "Assets/Fonts/Montserrat-Bold.ttf").stat().st_size > 10_000
 assert "SIL OPEN FONT LICENSE" in (repo / "Assets/Fonts/OFL.txt").read_text()
 print("Pinned and organization heading typography checks passed")
 PY
-# Regression guard: launch only the requested folder; do not activate every VS Code window.
+# Regression guard: delegate independent clones to Sweetiebot without raising existing windows.
 python3 - "$repo_dir/Sources/RepoLauncher.swift" <<'PY'
 from pathlib import Path
 import sys
 source = Path(sys.argv[1]).read_text()
 launch = source.split('private func openInVSCode(', 1)[1].split('\nenum Palette', 1)[0]
-assert 'task.arguments = ["--new-window", url.path]' in launch, "Selected folder must open in its own VS Code window"
-assert '.activateAllWindows' not in launch, "Do not raise every existing VS Code window"
-assert 'vsCode.activate(' not in launch and 'yieldActivation(' not in launch, "Leave window focus to the VS Code CLI"
-print("VS Code selected-window launch checks passed")
+assert 'forResource: "open-workspace", withExtension: "js"' in launch, "Use the bundled Sweetiebot bridge"
+assert 'url.path, displayName]' in launch, "Pass the selected checkout to Sweetiebot"
+assert '.activateAllWindows' not in launch, "Do not raise existing VS Code windows"
+assert 'vsCode.activate(' not in launch and 'yieldActivation(' not in launch, "Leave focus to VS Code"
+print("Sweetiebot workspace selected-window launch checks passed")
 PY
 # Regression guard: activating Mobli follows the current macOS Space, even if
 # its existing window is still visible on a different Space.
@@ -92,7 +94,7 @@ xcrun swiftc -parse-as-library "$check_dir/Activity.swift" "$repo_dir/tests/Acti
 xcrun swiftc -parse-as-library "$check_dir/StreamModel.swift" "$repo_dir/tests/StreamChecks.swift" -o "$check_dir/stream-checks"
 "$check_dir/stream-checks"
 
-xcrun swiftc -parse-as-library "$check_dir/Discovery.swift" "$repo_dir/tests/DiscoveryChecks.swift" -o "$check_dir/discovery-checks"
+xcrun swiftc -parse-as-library "$check_dir/Discovery.swift" "$repo_dir/Sources/RepositoryRename.swift" "$repo_dir/tests/DiscoveryChecks.swift" -o "$check_dir/discovery-checks"
 "$check_dir/discovery-checks"
 
 xcrun swiftc -parse-as-library "$check_dir/OwnerOrder.swift" "$repo_dir/tests/OwnerOrderChecks.swift" -o "$check_dir/owner-order-checks"
@@ -101,7 +103,7 @@ xcrun swiftc -parse-as-library "$check_dir/OwnerOrder.swift" "$repo_dir/tests/Ow
 xcrun swiftc -parse-as-library "$check_dir/Agenda.swift" "$repo_dir/tests/AgendaChecks.swift" -o "$check_dir/agenda-checks"
 "$check_dir/agenda-checks"
 
-xcrun swiftc -parse-as-library "$check_dir/PinPlacement.swift" "$repo_dir/tests/PinPlacementChecks.swift" -o "$check_dir/pin-placement-checks"
+xcrun swiftc -parse-as-library "$check_dir/PinPlacement.swift" "$repo_dir/Sources/RepositoryRename.swift" "$repo_dir/tests/PinPlacementChecks.swift" -o "$check_dir/pin-placement-checks"
 "$check_dir/pin-placement-checks"
 
 xcrun swiftc -parse-as-library "$check_dir/AgendaAPI.swift" "$repo_dir/tests/AgendaWriteChecks.swift" -o "$check_dir/agenda-api-checks" -framework AppKit
