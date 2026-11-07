@@ -90,8 +90,13 @@ touch "$cache_root/last-remote-check"
 catalog="$cache_root/catalog.git"
 [[ -d "$catalog" ]] || /usr/bin/git init --bare "$catalog" >/dev/null
 GIT_TERMINAL_PROMPT=0 /usr/bin/git -c http.lowSpeedLimit=1 -c http.lowSpeedTime=30 --git-dir="$catalog" fetch --quiet https://github.com/pony-factor/mobli.git main:refs/heads/published
-/usr/bin/git --git-dir="$catalog" archive published 'Repository Launcher.app' | /usr/bin/tar -x -C "$work"
-candidate="$work/Repository Launcher.app"
+published_app=Mobli.app
+# Accept builds published before the app was renamed.
+if ! /usr/bin/git --git-dir="$catalog" cat-file -e "published:$published_app" 2>/dev/null; then
+  published_app='Repository Launcher.app'
+fi
+/usr/bin/git --git-dir="$catalog" archive published "$published_app" | /usr/bin/tar -x -C "$work"
+candidate="$work/$published_app"
 revision=$(plist_value "$candidate" LauncherSourceRevision)
 baseline=$(plist_value "$app_path" LauncherSourceRevision)
 fingerprint=$(plist_value "$candidate" LauncherSourceFingerprint)

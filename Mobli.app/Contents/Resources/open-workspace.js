@@ -11,8 +11,10 @@ function sweetiebotModule(extensions = path.join(os.homedir(), '.vscode', 'exten
     .filter(name => name.startsWith('pony-factor.sweetiebot-scm-'))
     .sort((a, b) => b.localeCompare(a, 'en', { numeric: true }));
   for (const version of versions) {
-    const modulePath = path.join(extensions, version, 'new_workspace.js');
-    if (fs.existsSync(modulePath)) return modulePath;
+    for (const relativePath of ['branches/new-workspace.js', 'new_workspace.js']) {
+      const modulePath = path.join(extensions, version, relativePath);
+      if (fs.existsSync(modulePath)) return modulePath;
+    }
   }
   throw new Error('Install Sweetiebot to open independent workspaces.');
 }

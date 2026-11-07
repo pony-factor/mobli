@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -eu
 source_dir=${0:A:h}
-destination=${1:-"$source_dir/Repository Launcher.app"}
+destination=${1:-"$source_dir/Mobli.app"}
 mkdir -p "$destination/Contents/MacOS" "$destination/Contents/Resources/Fonts"
 xcrun swiftc -O -parse-as-library "$source_dir/Sources/RepoLauncher.swift" "$source_dir/Sources/RecentBranches.swift" "$source_dir/Sources/RepositoryRename.swift" "$source_dir/Sources/Notifications.swift" "$source_dir/Sources/Agenda.swift" "$source_dir/Sources/Activity.swift" "$source_dir/Sources/Stream.swift" "$source_dir/Sources/CalendarReminders.swift" -o "$destination/Contents/MacOS/RepositoryLauncher" -framework SwiftUI -framework AppKit -framework Security
 ditto "$source_dir/AppIcon.icns" "$destination/Contents/Resources/AppIcon.icns"
@@ -20,7 +20,8 @@ cat > "$destination/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIdentifier</key><string>studio.repository-launcher</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>ATSApplicationFontsPath</key><string>Fonts/</string>
-<key>CFBundleName</key><string>Repository Launcher</string>
+<key>CFBundleName</key><string>Mobli</string>
+<key>CFBundleDisplayName</key><string>Mobli</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>1.0</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>

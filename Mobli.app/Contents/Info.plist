@@ -4,6 +4,8 @@
 <dict>
 	<key>ATSApplicationFontsPath</key>
 	<string>Fonts/</string>
+	<key>CFBundleDisplayName</key>
+	<string>Mobli</string>
 	<key>CFBundleExecutable</key>
 	<string>RepositoryLauncher</string>
 	<key>CFBundleIconFile</key>
@@ -11,7 +13,7 @@
 	<key>CFBundleIdentifier</key>
 	<string>studio.repository-launcher</string>
 	<key>CFBundleName</key>
-	<string>Repository Launcher</string>
+	<string>Mobli</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -19,11 +21,11 @@
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>LauncherSourceClean</key>
-	<string>true</string>
+	<string>false</string>
 	<key>LauncherSourceFingerprint</key>
-	<string>5cfa6f9890edc7bf0c77d3a0a368a2e131f9833f6eb218619feb62277e18f8b4</string>
+	<string>fa88d23e2f68d9f8f874a096e7bff5486cbae69d4e77de9458f5a938a143b587</string>
 	<key>LauncherSourceRevision</key>
-	<string>b808128971142b29af549ec82e2273c517ad2a5b</string>
+	<string>d0a3c04aec75ceb79a96b0769e2bbb8195b8f76b</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 </dict>

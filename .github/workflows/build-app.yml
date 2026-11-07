@@ -41,23 +41,23 @@ jobs:
         run: zsh tests/check.sh
 
       - name: Build app
-        run: zsh build-app.sh "$RUNNER_TEMP/Repository Launcher.app"
+        run: zsh build-app.sh "$RUNNER_TEMP/Mobli.app"
 
       - name: Verify and package app
         run: |
           set -eu
-          app_path="$RUNNER_TEMP/Repository Launcher.app"
+          app_path="$RUNNER_TEMP/Mobli.app"
           zsh tests/UpdateChecks.sh "$app_path"
           plutil -lint "$app_path/Contents/Info.plist"
           codesign --verify --deep --strict "$app_path"
           lipo "$app_path/Contents/MacOS/RepositoryLauncher" -verify_arch "${{ matrix.arch }}"
-          ditto -c -k --sequesterRsrc --keepParent "$app_path" "$RUNNER_TEMP/Repository-Launcher-${{ matrix.arch }}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$app_path" "$RUNNER_TEMP/Mobli-${{ matrix.arch }}.zip"
 
       - name: Upload app
         uses: actions/upload-artifact@v4
         with:
-          name: Repository-Launcher-${{ matrix.arch }}
-          path: ${{ runner.temp }}/Repository-Launcher-${{ matrix.arch }}.zip
+          name: Mobli-${{ matrix.arch }}
+          path: ${{ runner.temp }}/Mobli-${{ matrix.arch }}.zip
           if-no-files-found: error
           retention-days: 30
 
@@ -75,19 +75,19 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
-          pattern: Repository-Launcher-*
+          pattern: Mobli-*
           path: ${{ runner.temp }}/builds
       - name: Assemble and verify both architectures
         run: |
           set -eu
-          ditto -x -k "$RUNNER_TEMP/builds/Repository-Launcher-arm64/Repository-Launcher-arm64.zip" "$RUNNER_TEMP/arm64"
-          ditto -x -k "$RUNNER_TEMP/builds/Repository-Launcher-x86_64/Repository-Launcher-x86_64.zip" "$RUNNER_TEMP/x86_64"
-          zsh assemble-app.sh "$RUNNER_TEMP/arm64/Repository Launcher.app" "$RUNNER_TEMP/x86_64/Repository Launcher.app" "$RUNNER_TEMP/Repository Launcher.app"
-          ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/Repository Launcher.app" "$RUNNER_TEMP/Repository-Launcher-universal.zip"
+          ditto -x -k "$RUNNER_TEMP/builds/Mobli-arm64/Mobli-arm64.zip" "$RUNNER_TEMP/arm64"
+          ditto -x -k "$RUNNER_TEMP/builds/Mobli-x86_64/Mobli-x86_64.zip" "$RUNNER_TEMP/x86_64"
+          zsh assemble-app.sh "$RUNNER_TEMP/arm64/Mobli.app" "$RUNNER_TEMP/x86_64/Mobli.app" "$RUNNER_TEMP/Mobli.app"
+          ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/Mobli.app" "$RUNNER_TEMP/Mobli-universal.zip"
       - uses: actions/upload-artifact@v4
         with:
-          name: Repository-Launcher-universal
-          path: ${{ runner.temp }}/Repository-Launcher-universal.zip
+          name: Mobli-universal
+          path: ${{ runner.temp }}/Mobli-universal.zip
           if-no-files-found: error
           retention-days: 30
 
@@ -106,7 +106,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: Repository-Launcher-universal
+          name: Mobli-universal
           path: ${{ runner.temp }}/universal
       - name: Commit rebuilt app
         run: |
@@ -116,18 +116,18 @@ jobs:
             print 'A newer main commit exists; its workflow will publish the app.'
             exit 0
           fi
-          ditto -x -k "$RUNNER_TEMP/universal/Repository-Launcher-universal.zip" "$RUNNER_TEMP/rebuilt"
-          ditto "$RUNNER_TEMP/rebuilt/Repository Launcher.app" "Repository Launcher.app"
-          codesign --verify --deep --strict "Repository Launcher.app"
+          ditto -x -k "$RUNNER_TEMP/universal/Mobli-universal.zip" "$RUNNER_TEMP/rebuilt"
+          ditto "$RUNNER_TEMP/rebuilt/Mobli.app" "Mobli.app"
+          codesign --verify --deep --strict "Mobli.app"
           for architecture in arm64 x86_64; do
-            lipo "Repository Launcher.app/Contents/MacOS/RepositoryLauncher" -verify_arch "$architecture"
+            lipo "Mobli.app/Contents/MacOS/RepositoryLauncher" -verify_arch "$architecture"
           done
-          git add -- "Repository Launcher.app"
+          git add -- "Mobli.app"
           if git diff --cached --quiet; then
             print 'The tracked app is already current.'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m '📦 Update compiled repository launcher'
+          git commit -m '📦 Update compiled Mobli app'
           git push origin HEAD:main

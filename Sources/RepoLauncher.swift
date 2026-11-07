@@ -1150,7 +1150,7 @@ enum OwnerOrdering {
         let task = Process()
         if independent {
             guard let script = Bundle.main.url(forResource: "open-workspace", withExtension: "js") else {
-                error = "The Sweetiebot workspace launcher is missing. Rebuild Repository Launcher."
+                error = "The Sweetiebot workspace launcher is missing. Rebuild Mobli."
                 return
             }
             task.executableURL = URL(fileURLWithPath: app + "/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper")
@@ -2376,7 +2376,7 @@ struct LauncherView: View {
             .padding(24)
             .frame(width: 390)
         }
-        .alert("Repository Launcher", isPresented: Binding(get: { library.error != nil }, set: { if !$0 { library.error = nil } })) {
+        .alert("Mobli", isPresented: Binding(get: { library.error != nil }, set: { if !$0 { library.error = nil } })) {
             Button("OK") { library.error = nil }
         } message: { Text(library.error ?? "") }
     }
@@ -2947,7 +2947,7 @@ private enum LauncherWindowSize {
     var body: some Scene {
         // Reopening from the Dock must reuse the launcher, including while it
         // is hidden or minimized after opening a repository.
-        Window("Repository Launcher", id: "launcher") {
+        Window("Mobli", id: "launcher") {
             LauncherView()
                 .background(LauncherWindowConfiguration())
         }
