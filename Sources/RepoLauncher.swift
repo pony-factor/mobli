@@ -1083,6 +1083,7 @@ enum OwnerOrdering {
                 return
             }
             await refresh(priorityOwners: owners)
+            open(repo)
         } catch {
             self.error = "Couldn’t clone \(repo.fullName): \(error.localizedDescription)"
         }
