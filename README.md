@@ -8,7 +8,7 @@ Settings includes saved toggles for repository counts in category headers and Gi
 
 The repository list persists in `~/Library/Application Support/studio.repository-launcher/repositories.json`. On launch, the saved list and cached owner names and logos appear immediately, while repository discovery refreshes in the background. Local changes appear before GitHub requests finish, and a failed GitHub refresh keeps the previous remote list available. Successful GitHub repository results are reused for five minutes; opening Settings forces a refresh.
 
-Find searches local folders and the connected GitHub repository catalog by repository name or owner/name. Local repositories appear before cloud repositories, which show a cloud icon and their GitHub owner. Select a cloud result to open it on GitHub, or use its download button to clone it into `~/GitHub`. Results update when the repository catalog refreshes or a clone finishes.
+Find searches local folders and the connected GitHub repository catalog by repository name or owner/name. Local repositories appear before cloud repositories, which show a cloud icon and their GitHub owner. Select a cloud result to open it on GitHub, or use its download button to clone it into `~/GitHub` and automatically open a Sweetiebot workspace after the download succeeds. Results update when the repository catalog refreshes or a clone finishes.
 
 Repository discovery also refreshes in the background when the app becomes active. It checks `.git` directories and worktree marker files and asks Git for the origin URL without reading repository contents or credential files.
 
