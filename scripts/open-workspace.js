@@ -20,22 +20,34 @@ function sweetiebotModule(extensions = path.join(os.homedir(), '.vscode', 'exten
 }
 
 async function openWorkspace(code, folder, name, {
-  create = require(sweetiebotModule()).openIndependentWorkspace,
+  create,
+  extensions,
   run = promisify(execFile)
 } = {}) {
   const uri = location => ({ scheme: 'file', fsPath: location });
-  return create({
-    workspace: { workspaceFolders: [{ uri: uri(folder), name }] },
-    Uri: { file: uri },
-    commands: {
-      async executeCommand(command, target, options) {
-        if (command !== 'vscode.openFolder' || options?.forceNewWindow !== true) {
-          throw new Error('Unsupported Sweetiebot launch command.');
+  let launchAttempted = false;
+  try {
+    create ??= require(sweetiebotModule(extensions)).openIndependentWorkspace;
+    return await create({
+      workspace: { workspaceFolders: [{ uri: uri(folder), name }] },
+      Uri: { file: uri },
+      commands: {
+        async executeCommand(command, target, options) {
+          if (command !== 'vscode.openFolder' || options?.forceNewWindow !== true) {
+            throw new Error('Unsupported Sweetiebot launch command.');
+          }
+          launchAttempted = true;
+          await run(code, ['--new-window', target.fsPath]);
         }
-        await run(code, ['--new-window', target.fsPath]);
       }
-    }
-  });
+    });
+  } catch (error) {
+    // Once VS Code has been invoked, preserve its result instead of opening
+    // a second window on a different checkout.
+    if (launchAttempted) throw error;
+    await run(code, ['--new-window', folder]);
+    return { target: folder };
+  }
 }
 
 if (require.main === module) {

@@ -1149,16 +1149,12 @@ enum OwnerOrdering {
             error = "Install Visual Studio Code in Applications to open folders."; return
         }
         let task = Process()
-        if independent {
-            guard let script = Bundle.main.url(forResource: "open-workspace", withExtension: "js") else {
-                error = "The Sweetiebot workspace launcher is missing. Rebuild Mobli."
-                return
-            }
+        if independent, let script = Bundle.main.url(forResource: "open-workspace", withExtension: "js") {
             task.executableURL = URL(fileURLWithPath: app + "/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper")
             var environment = ProcessInfo.processInfo.environment
             environment["ELECTRON_RUN_AS_NODE"] = "1"
             task.environment = environment
-            // Repository clicks start on main in an independent Sweetiebot checkout.
+            // Prefer Sweetiebot shared main; the bridge falls back to this folder.
             task.arguments = [script.path, app + "/Contents/Resources/app/bin/code", url.path, displayName]
         } else {
             task.executableURL = URL(fileURLWithPath: app + "/Contents/Resources/app/bin/code")
@@ -1170,7 +1166,7 @@ enum OwnerOrdering {
         task.terminationHandler = { process in
             Task { @MainActor in
                 if process.terminationStatus == 0 { return }
-                self.error = "Couldn’t create a Sweetiebot workspace for \(displayName). Make sure Sweetiebot is installed and the repository has a local main branch."
+                self.error = "Couldn’t open \(displayName) in VS Code. Try opening the folder again."
                 NSApplication.shared.unhide(nil)
                 for window in windows { window.deminiaturize(nil) }
                 NSApplication.shared.activate(ignoringOtherApps: true)
