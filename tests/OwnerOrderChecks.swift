@@ -20,6 +20,11 @@ import Foundation
         precondition(OwnerOrdering.normalizedOwner("  pony-factor  ") == "pony-factor")
         precondition(OwnerOrdering.normalizedOwner("not valid!") == nil)
 
+        let mixedCase = OwnerOrdering.ordered(["blocktransfer", "AM-only", "am-only", "WhyDRS"],
+                                              preferred: ["am-only", "AM-only", "WHYDRS", "blocktransfer"])
+        precondition(mixedCase == ["AM-only", "WhyDRS", "blocktransfer"])
+        precondition(OwnerOrdering.ordered(["AM-only", "am-only"], preferred: []) == ["AM-only"])
+
         print("PASS: organization ordering, drag placement, persistence order, new-owner append, owner validation")
     }
 }

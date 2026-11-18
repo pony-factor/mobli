@@ -744,14 +744,17 @@ actor GitHubRepositoryCatalog {
 enum OwnerOrdering {
     static func ordered(_ owners: [String], preferred: [String]) -> [String] {
         var seen = Set<String>()
-        let unique = owners.filter { seen.insert($0).inserted }
-        let available = Set(unique)
+        let unique = owners.filter { seen.insert($0.lowercased()).inserted }
+        let available = Dictionary(uniqueKeysWithValues: unique.map { ($0.lowercased(), $0) })
         var result: [String] = []
         var placed = Set<String>()
-        for owner in preferred where available.contains(owner) && placed.insert(owner).inserted {
-            result.append(owner)
+        for owner in preferred {
+            let key = owner.lowercased()
+            if let canonical = available[key], placed.insert(key).inserted {
+                result.append(canonical)
+            }
         }
-        result.append(contentsOf: unique.filter { !placed.contains($0) }
+        result.append(contentsOf: unique.filter { !placed.contains($0.lowercased()) }
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending })
         return result
     }
@@ -963,7 +966,8 @@ enum OwnerOrdering {
         Array(Set(repos.map(\.owner))).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
     func repositories(for owner: String) -> [Repository] {
-        repos.filter { $0.owner == owner }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        repos.filter { $0.owner.caseInsensitiveCompare(owner) == .orderedSame }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
     func refresh(forceProfiles: Bool = false, priorityOwners: [String] = []) async {
         if refreshing {
@@ -2150,7 +2154,7 @@ struct LauncherView: View {
                                     }
                                     .background(Palette.columnInterior)
                                 } else if notifications {
-                                    let threads = inbox.threads.filter { $0.owner == owner }
+                                    let threads = inbox.threads.filter { $0.owner.caseInsensitiveCompare(owner) == .orderedSame }
                                     OwnerHeader(owner: owner, profile: inbox.profiles[owner], subtitle: "\(threads.count) unread", showOwnerSlugs: showOwnerSlugs)
                                         .draggable(owner).help("Drag to reorder organizations")
                                     ScrollView(.vertical) {
@@ -2217,8 +2221,8 @@ struct LauncherView: View {
                             }
                             .frame(width: width, height: max(200, geometry.size.height - 48 - BottomHorizontalScrollbar.height))
                             .background(Palette.column).clipShape(RoundedRectangle(cornerRadius: 8))
-                            .saturation(draggedPinnedOwner != nil && draggedPinnedOwner != owner ? 0.25 : 1)
-                            .opacity(draggedPinnedOwner != nil && draggedPinnedOwner != owner ? 0.58 : 1)
+                            .saturation(draggedPinnedOwner != nil && draggedPinnedOwner != owner.lowercased() ? 0.25 : 1)
+                            .opacity(draggedPinnedOwner != nil && draggedPinnedOwner != owner.lowercased() ? 0.58 : 1)
                             .animation(.easeOut(duration: 0.12), value: draggedPinnedOwner)
                             .overlay {
                                 RoundedRectangle(cornerRadius: 8)
@@ -2228,7 +2232,7 @@ struct LauncherView: View {
                                 if !notifications && !activity {
                                     if let draggedPinnedOwner {
                                         defer { endPinnedDrag() }
-                                        guard draggedPinnedOwner == owner else { return false }
+                                        guard draggedPinnedOwner == owner.lowercased() else { return false }
                                         return receiveColumnPin(items, owner: owner)
                                     }
                                     if receiveColumnPin(items, owner: owner) { return true }
@@ -2239,7 +2243,7 @@ struct LauncherView: View {
                                 return true
                             } isTargeted: { targeted in
                                 if targeted {
-                                    if draggedPinnedOwner == nil || draggedPinnedOwner == owner {
+                                    if draggedPinnedOwner == nil || draggedPinnedOwner == owner.lowercased() {
                                         dropTarget = owner
                                     } else if dropTarget == owner {
                                         dropTarget = nil
@@ -2656,7 +2660,7 @@ struct LauncherView: View {
 
     private func beginPinnedDrag(_ repository: Repository) -> NSItemProvider {
         endPinnedDrag()
-        draggedPinnedOwner = repository.owner
+        draggedPinnedOwner = repository.owner.lowercased()
         pinnedDragMouseUpMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp]) { event in
             DispatchQueue.main.async { endPinnedDrag() }
             return event
